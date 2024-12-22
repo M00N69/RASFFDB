@@ -58,7 +58,8 @@ def load_data_from_db():
     connection = sqlite3.connect(DB_FILE)
     df = pd.read_sql_query("SELECT * FROM rasff_data", connection)
     connection.close()
-    df["date_of_case"] = pd.to_datetime(df["date_of_case"], errors="coerce")
+    if 'date_of_case' in df.columns:
+        df['date_of_case'] = pd.to_datetime(df['date_of_case'], errors='coerce')
     return df
 
 # Obtenir la dernière semaine dans la base de données
@@ -70,7 +71,7 @@ def get_last_week_in_db():
 
     if result:
         try:
-            last_date = datetime.strptime(result, "%Y-%m-%d")
+            last_date = pd.to_datetime(result)
             return last_date.isocalendar()[:2]  # Renvoie (année, semaine)
         except ValueError:
             st.warning("Erreur dans le format de la date dans la base.")
@@ -92,8 +93,6 @@ def download_and_process_data(year, week):
     except Exception as e:
         st.error(f"Erreur lors du téléchargement : {e}")
     return None
-# Convertir la colonne 'date' en datetime
-data['date'] = pd.to_datetime(data['date'], errors='coerce', format="%d-%m-%Y %H:%M:%S")
 
 # Nettoyer et mapper les données
 def clean_and_map_data(df):
@@ -174,48 +173,30 @@ def view_database(df: pd.DataFrame):
     st.header("Base de Données")
     st.sidebar.header("Filtres")
 
-    # Convertir les dates si nécessaire
-    if df['date'].dtype != 'datetime64[ns]':
-        df['date'] = pd.to_datetime(df['date'], errors='coerce', format="%d-%m-%Y %H:%M:%S")
+    if 'date_of_case' not in df.columns:
+        st.error("Colonne 'date_of_case' introuvable dans les données.")
+        return
 
-    # Obtenir les années et semaines disponibles
-    df['year'] = df['date'].dt.year
-    df['week'] = df['date'].dt.isocalendar().week
+    df['year'] = df['date_of_case'].dt.year
+    df['week'] = df['date_of_case'].dt.isocalendar().week
     min_year, max_year = df['year'].min(), df['year'].max()
 
-    # Sélection des années et semaines
     selected_year = st.sidebar.selectbox("Année", list(range(min_year, max_year + 1)))
-    selected_start_week, selected_end_week = st.sidebar.select_slider(
-        "Semaine (Plage)",
-        options=list(range(1, 54)),
-        value=(1, 52)
-    )
+    selected_weeks = st.sidebar.slider("Semaines", 1, 53, (1, 53))
 
-    # Filtrer par année et semaine
     filtered_df = df[(df['year'] == selected_year) &
-                     (df['week'] >= selected_start_week) &
-                     (df['week'] <= selected_end_week)]
+                     (df['week'] >= selected_weeks[0]) &
+                     (df['week'] <= selected_weeks[1])]
 
-    # Ajouter filtres pour catégories et dangers
-    categories = st.sidebar.multiselect("Catégories de Produits", sorted(df['category'].unique()))
+    categories = st.sidebar.multiselect("Catégories de Produits", sorted(df['prodcat'].dropna().unique()))
     if categories:
-        filtered_df = filtered_df[filtered_df['category'].isin(categories)]
+        filtered_df = filtered_df[filtered_df['prodcat'].isin(categories)]
 
-    hazards = st.sidebar.multiselect("Catégories de Dangers", sorted(df['hazards'].dropna().unique()))
+    hazards = st.sidebar.multiselect("Catégories de Dangers", sorted(df['hazcat'].dropna().unique()))
     if hazards:
-        filtered_df = filtered_df[filtered_df['hazards'].isin(hazards)]
+        filtered_df = filtered_df[filtered_df['hazcat'].isin(hazards)]
 
     st.dataframe(filtered_df)
-
-# Tableau de Bord
-def display_dashboard(df: pd.DataFrame):
-    st.header("Tableau de Bord")
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Notifications Totales", len(df))
-    col2.metric("Catégories de Produits", df['prodcat'].nunique())
-    col3.metric("Catégories de Dangers", df['hazcat'].nunique())
-    fig = px.bar(df['prodcat'].value_counts(), x=df['prodcat'].value_counts().index, y=df['prodcat'].value_counts().values, labels={"x": "Produits", "y": "Nombre"}, title="Produits")
-    st.plotly_chart(fig)
 
 # Main
 def main():
@@ -228,6 +209,7 @@ def main():
     )
 
     if menu == "Tableau de Bord":
+        st.title("Tableau de Bord")
         display_dashboard(df)
     elif menu == "Base de Données":
         view_database(df)
