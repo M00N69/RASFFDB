@@ -6,11 +6,12 @@ from datetime import datetime
 import os
 from github import Github
 import plotly.express as px
+from scipy.stats import chi2_contingency
 import seaborn as sns
 import matplotlib.pyplot as plt
-from scipy.stats import chi2_contingency
 
 # Configuration
+st.set_page_config(page_title="RASFF Data Manager", layout="wide")
 DB_FILE = "rasff_data.db"
 HEADERS = [
     "date_of_case", "reference", "notification_from", "country_origin",
@@ -18,47 +19,25 @@ HEADERS = [
     "prodcat", "groupprod", "hazcat", "grouphaz"
 ]
 
-# Mappings des colonnes entre les fichiers Excel et le format attendu
-WEEKLY_COLUMN_MAPPING = {
-    "date": "date_of_case",
-    "reference": "reference",
-    "notifying_country": "notification_from",
-    "origin": "country_origin",
-    "subject": "product",
-    "category": "product_category",
-    "hazards": "hazard_substance"
-}
-
 # Mappings des catégories de produits
 PRODUCT_CATEGORY_MAPPING = {
     "alcoholic beverages": ["Alcoholic Beverages", "Beverages"],
     "animal by-products": ["Animal By-products", "Animal Products"],
-    "bivalve molluscs and products thereof": ["Bivalve Molluscs", "Seafood"],
-    "cephalopods and products thereof": ["Cephalopods", "Seafood"],
+    "seafood": ["Fish and Seafood", "Seafood"],
     "cereals and bakery products": ["Cereals and Bakery Products", "Grains and Bakery"],
-    "dietetic foods, food supplements and fortified foods": ["Dietetic Foods and Supplements", "Specialty Foods"],
-    "eggs and egg products": ["Eggs and Egg Products", "Animal Products"],
-    "fats and oils": ["Fats and Oils", "Fats and Oils"],
-    "fruits and vegetables": ["Fruits and Vegetables", "Fruits and Vegetables"],
     "milk and milk products": ["Milk and Milk Products", "Dairy"],
-    "nuts, nut products and seeds": ["Nuts and Seeds", "Seeds and Nuts"],
-    "poultry meat and poultry meat products": ["Poultry Meat", "Meat Products"],
+    "nuts and seeds": ["Nuts and Seeds", "Seeds and Nuts"],
     "prepared dishes and snacks": ["Prepared Dishes and Snacks", "Prepared Foods"],
-    "soups, broths, sauces and condiments": ["Soups, Broths, Sauces", "Prepared Foods"],
-    "non-alcoholic beverages": ["Non-Alcoholic Beverages", "Beverages"],
-    "wine": ["Wine", "Beverages"],
+    "additives": ["Food Additives and Flavourings", "Additives"],
+    "fruits and vegetables": ["Fruits and Vegetables", "Fruits"],
 }
 
 # Mappings des catégories de dangers
 HAZARD_CATEGORY_MAPPING = {
-    "adulteration / fraud": ["Adulteration / Fraud", "Food Fraud"],
-    "allergens": ["Allergens", "Biological Hazard"],
-    "biological contaminants": ["Biological Contaminants", "Biological Hazard"],
-    "chemical contamination (other)": ["Chemical Contamination", "Chemical Hazard"],
-    "pathogenic micro-organisms": ["Pathogenic Micro-organisms", "Biological Hazard"],
-    "pesticide residues": ["Pesticide Residues", "Pesticide Hazard"],
-    "heavy metals": ["Heavy Metals", "Chemical Hazard"],
-    "mycotoxins": ["Mycotoxins", "Biological Hazard"],
+    "food fraud": ["Adulteration / Fraud", "Food Fraud"],
+    "biological hazard": ["Pathogenic Micro-organisms", "Biological Hazard"],
+    "chemical hazard": ["Chemical Contamination", "Chemical Hazard"],
+    "physical hazard": ["Foreign Bodies", "Physical Hazard"],
 }
 
 # Initialiser la base de données
@@ -73,28 +52,6 @@ def initialize_database():
     connection.commit()
     connection.close()
 
-# Nettoyer et mapper les données
-def clean_and_map_data(df):
-    df.rename(columns=WEEKLY_COLUMN_MAPPING, inplace=True)
-    for col in HEADERS:
-        if col not in df.columns:
-            df[col] = None
-    # Convertir et valider 'date_of_case'
-    df["date_of_case"] = pd.to_datetime(df["date_of_case"], errors="coerce").dt.strftime("%Y-%m-%d")
-    df["prodcat"] = df["product_category"].apply(
-        lambda x: PRODUCT_CATEGORY_MAPPING.get(x.lower(), ["Unknown", "Unknown"])[0] if pd.notnull(x) else "Unknown"
-    )
-    df["groupprod"] = df["product_category"].apply(
-        lambda x: PRODUCT_CATEGORY_MAPPING.get(x.lower(), ["Unknown", "Unknown"])[1] if pd.notnull(x) else "Unknown"
-    )
-    df["hazcat"] = df["hazard_substance"].apply(
-        lambda x: HAZARD_CATEGORY_MAPPING.get(x.lower(), ["Unknown", "Unknown"])[0] if pd.notnull(x) else "Unknown"
-    )
-    df["grouphaz"] = df["hazard_substance"].apply(
-        lambda x: HAZARD_CATEGORY_MAPPING.get(x.lower(), ["Unknown", "Unknown"])[1] if pd.notnull(x) else "Unknown"
-    )
-    return df[HEADERS]
-
 # Charger les données de la base SQLite
 @st.cache_data
 def load_data_from_db():
@@ -104,10 +61,93 @@ def load_data_from_db():
     df["date_of_case"] = pd.to_datetime(df["date_of_case"], errors="coerce")
     return df
 
-# Pousser le fichier .db sur GitHub
+# Obtenir la dernière semaine dans la base de données
+def get_last_week_in_db():
+    connection = sqlite3.connect(DB_FILE)
+    query = "SELECT MAX(date_of_case) FROM rasff_data"
+    result = pd.read_sql_query(query, connection).iloc[0, 0]
+    connection.close()
+
+    if result:
+        try:
+            last_date = datetime.strptime(result, "%Y-%m-%d")
+            return last_date.isocalendar()[:2]  # Renvoie (année, semaine)
+        except ValueError:
+            st.warning("Erreur dans le format de la date dans la base.")
+            return (2024, 1)  # Valeur par défaut
+    else:
+        return (2024, 1)
+
+# Télécharger et traiter les données pour une semaine donnée
+def download_and_process_data(year, week):
+    url_template = "https://www.sirene-diffusion.fr/regia/000-rasff/{}/rasff-{}-{}.xls"
+    url = url_template.format(str(year)[-2:], year, f"{week:02d}")
+    try:
+        response = requests.get(url)
+        if response.status_code == 200:
+            df = pd.read_excel(response.content)
+            return clean_and_map_data(df)
+        else:
+            st.warning(f"Échec du téléchargement pour {year}, semaine {week}.")
+    except Exception as e:
+        st.error(f"Erreur lors du téléchargement : {e}")
+    return None
+
+# Nettoyer et mapper les données
+def clean_and_map_data(df):
+    df.rename(columns={
+        "Date of Case": "date_of_case",
+        "Reference": "reference",
+        "Notification From": "notification_from",
+        "Country Origin": "country_origin",
+        "Product": "product",
+        "Product Category": "product_category",
+        "Hazard Substance": "hazard_substance",
+        "Hazard Category": "hazard_category"
+    }, inplace=True)
+    for col in HEADERS:
+        if col not in df.columns:
+            df[col] = None
+    df["prodcat"] = df["product_category"].apply(
+        lambda x: PRODUCT_CATEGORY_MAPPING.get(str(x).lower(), ["Unknown", "Unknown"])[0]
+    )
+    df["groupprod"] = df["product_category"].apply(
+        lambda x: PRODUCT_CATEGORY_MAPPING.get(str(x).lower(), ["Unknown", "Unknown"])[1]
+    )
+    df["hazcat"] = df["hazard_substance"].apply(
+        lambda x: HAZARD_CATEGORY_MAPPING.get(str(x).lower(), ["Unknown", "Unknown"])[0]
+    )
+    df["grouphaz"] = df["hazard_substance"].apply(
+        lambda x: HAZARD_CATEGORY_MAPPING.get(str(x).lower(), ["Unknown", "Unknown"])[1]
+    )
+    return df[HEADERS]
+
+# Mettre à jour la base avec les semaines manquantes
+def update_database():
+    last_year, last_week = get_last_week_in_db()
+    current_year, current_week = datetime.now().isocalendar()[:2]
+
+    with st.spinner("Mise à jour des données..."):
+        for year in range(last_year, current_year + 1):
+            start_week = last_week + 1 if year == last_year else 1
+            end_week = current_week if year == current_year else 53
+            for week in range(start_week, end_week + 1):
+                data = download_and_process_data(year, week)
+                if data is not None:
+                    save_to_database(data)
+        st.success("Base de données mise à jour avec succès !")
+
+# Sauvegarder dans la base SQLite
+def save_to_database(data):
+    if data is not None:
+        connection = sqlite3.connect(DB_FILE)
+        data.to_sql("rasff_data", connection, if_exists="append", index=False)
+        connection.close()
+
+# Synchroniser avec GitHub
 def push_db_to_github():
-    token = os.getenv("GITHUB_TOKEN")  # Configurez votre token dans Streamlit Cloud
-    repo_name = "M00N69/RASFFDB"  # Remplacez par votre dépôt GitHub
+    token = os.getenv("GITHUB_TOKEN")
+    repo_name = "M00N69/RASFFDB"
     file_path = DB_FILE
 
     try:
@@ -127,80 +167,48 @@ def push_db_to_github():
     except Exception as e:
         st.error(f"Erreur lors de la mise à jour sur GitHub : {e}")
 
-# Afficher les statistiques clés
-def display_statistics(df: pd.DataFrame):
-    st.header("Statistiques Clés")
+# Vue Base de Données avec Filtres
+def view_database(df: pd.DataFrame):
+    st.header("Base de Données")
+    st.sidebar.header("Filtres")
+    min_date, max_date = st.sidebar.date_input("Plage de Dates", [df['date_of_case'].min(), df['date_of_case'].max()])
+    filtered_df = df[(df['date_of_case'] >= min_date) & (df['date_of_case'] <= max_date)]
+    categories = st.sidebar.multiselect("Catégories de Produits", sorted(df['prodcat'].unique()))
+    if categories:
+        filtered_df = filtered_df[filtered_df['prodcat'].isin(categories)]
+    hazards = st.sidebar.multiselect("Catégories de Dangers", sorted(df['hazcat'].unique()))
+    if hazards:
+        filtered_df = filtered_df[filtered_df['hazcat'].isin(hazards)]
+    st.dataframe(filtered_df)
+
+# Tableau de Bord
+def display_dashboard(df: pd.DataFrame):
+    st.header("Tableau de Bord")
     col1, col2, col3 = st.columns(3)
     col1.metric("Notifications Totales", len(df))
     col2.metric("Catégories de Produits", df['prodcat'].nunique())
     col3.metric("Catégories de Dangers", df['hazcat'].nunique())
-
-# Visualisations interactives avec Plotly
-def display_visualizations(df: pd.DataFrame):
-    st.header("Visualisations")
-    fig_product = px.bar(
-        df['prodcat'].value_counts(),
-        x=df['prodcat'].value_counts().index,
-        y=df['prodcat'].value_counts().values,
-        labels={"x": "Catégories de Produits", "y": "Nombre"},
-        title="Répartition des Catégories de Produits"
-    )
-    st.plotly_chart(fig_product)
-
-    fig_hazard = px.pie(
-        df['hazcat'].value_counts(),
-        values=df['hazcat'].value_counts().values,
-        names=df['hazcat'].value_counts().index,
-        title="Répartition des Catégories de Dangers"
-    )
-    st.plotly_chart(fig_hazard)
-
-# Analyse statistique avec Chi2
-def perform_statistical_analysis(df: pd.DataFrame):
-    st.title("Analyse Statistique : Test Chi2")
-    contingency_table = pd.crosstab(df['prodcat'], df['hazcat'])
-    st.write("Table de Contingence", contingency_table)
-
-    chi2_stat, p_value, dof, expected = chi2_contingency(contingency_table)
-    st.write(f"**Chi2 Statistique**: {chi2_stat:.2f}")
-    st.write(f"**P-value**: {p_value:.4f}")
-
-    if p_value < 0.05:
-        st.success("Résultat statistiquement significatif (P-value < 0.05).")
-    else:
-        st.warning("Résultat non significatif (P-value >= 0.05).")
-
-    st.subheader("Heatmap : Produits vs Dangers")
-    fig, ax = plt.subplots(figsize=(12, 8))
-    sns.heatmap(contingency_table, annot=True, cmap="coolwarm", fmt="d", ax=ax)
-    st.pyplot(fig)
+    fig = px.bar(df['prodcat'].value_counts(), x=df['prodcat'].value_counts().index, y=df['prodcat'].value_counts().values, labels={"x": "Produits", "y": "Nombre"}, title="Produits")
+    st.plotly_chart(fig)
 
 # Main
 def main():
-    st.title("RASFF Data Analysis and Management")
-
-    # Initialiser la base de données
     initialize_database()
-
-    # Charger les données
     df = load_data_from_db()
 
-    # Navigation
-    menu = st.sidebar.selectbox(
-        "Menu",
-        ["Dashboard", "Analyse Statistique", "Pousser vers GitHub"]
+    menu = st.sidebar.radio(
+        "Navigation",
+        ["Tableau de Bord", "Base de Données", "Mise à Jour", "Synchronisation GitHub"]
     )
 
-    if menu == "Dashboard":
-        st.header("Tableau de Bord")
-        display_statistics(df)
-        display_visualizations(df)
-
-    elif menu == "Analyse Statistique":
-        st.header("Analyse Statistique")
-        perform_statistical_analysis(df)
-
-    elif menu == "Pousser vers GitHub":
+    if menu == "Tableau de Bord":
+        display_dashboard(df)
+    elif menu == "Base de Données":
+        view_database(df)
+    elif menu == "Mise à Jour":
+        if st.button("Mettre à jour la base de données"):
+            update_database()
+    elif menu == "Synchronisation GitHub":
         if st.button("Pousser le fichier .db vers GitHub"):
             push_db_to_github()
 
