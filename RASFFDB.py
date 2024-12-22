@@ -92,6 +92,8 @@ def download_and_process_data(year, week):
     except Exception as e:
         st.error(f"Erreur lors du téléchargement : {e}")
     return None
+# Convertir la colonne 'date' en datetime
+data['date'] = pd.to_datetime(data['date'], errors='coerce', format="%d-%m-%Y %H:%M:%S")
 
 # Nettoyer et mapper les données
 def clean_and_map_data(df):
@@ -172,36 +174,37 @@ def view_database(df: pd.DataFrame):
     st.header("Base de Données")
     st.sidebar.header("Filtres")
 
-    # Obtenir les années et semaines min/max des données
-    min_year, max_year = df['date_of_case'].dt.year.min(), df['date_of_case'].dt.year.max()
-    min_week, max_week = df['date_of_case'].dt.isocalendar().week.min(), df['date_of_case'].dt.isocalendar().week.max()
+    # Convertir les dates si nécessaire
+    if df['date'].dtype != 'datetime64[ns]':
+        df['date'] = pd.to_datetime(df['date'], errors='coerce', format="%d-%m-%Y %H:%M:%S")
+
+    # Obtenir les années et semaines disponibles
+    df['year'] = df['date'].dt.year
+    df['week'] = df['date'].dt.isocalendar().week
+    min_year, max_year = df['year'].min(), df['year'].max()
 
     # Sélection des années et semaines
     selected_year = st.sidebar.selectbox("Année", list(range(min_year, max_year + 1)))
     selected_start_week, selected_end_week = st.sidebar.select_slider(
         "Semaine (Plage)",
         options=list(range(1, 54)),
-        value=(min_week, max_week)
+        value=(1, 52)
     )
 
-    # Filtrer les données par semaine et année
-    filtered_df = df[df['date_of_case'].dt.year == selected_year]
-    filtered_df = filtered_df[
-        (filtered_df['date_of_case'].dt.isocalendar().week >= selected_start_week) &
-        (filtered_df['date_of_case'].dt.isocalendar().week <= selected_end_week)
-    ]
+    # Filtrer par année et semaine
+    filtered_df = df[(df['year'] == selected_year) &
+                     (df['week'] >= selected_start_week) &
+                     (df['week'] <= selected_end_week)]
 
-    # Filtre sur les catégories de produits
-    categories = st.sidebar.multiselect("Catégories de Produits", sorted(df['prodcat'].dropna().unique()))
+    # Ajouter filtres pour catégories et dangers
+    categories = st.sidebar.multiselect("Catégories de Produits", sorted(df['category'].unique()))
     if categories:
-        filtered_df = filtered_df[filtered_df['prodcat'].isin(categories)]
+        filtered_df = filtered_df[filtered_df['category'].isin(categories)]
 
-    # Filtre sur les catégories de dangers
-    hazards = st.sidebar.multiselect("Catégories de Dangers", sorted(df['hazcat'].dropna().unique()))
+    hazards = st.sidebar.multiselect("Catégories de Dangers", sorted(df['hazards'].dropna().unique()))
     if hazards:
-        filtered_df = filtered_df[filtered_df['hazcat'].isin(hazards)]
+        filtered_df = filtered_df[filtered_df['hazards'].isin(hazards)]
 
-    # Affichage des données filtrées
     st.dataframe(filtered_df)
 
 # Tableau de Bord
