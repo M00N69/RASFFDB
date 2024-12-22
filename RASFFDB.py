@@ -171,14 +171,37 @@ def push_db_to_github():
 def view_database(df: pd.DataFrame):
     st.header("Base de Données")
     st.sidebar.header("Filtres")
-    min_date, max_date = st.sidebar.date_input("Plage de Dates", [df['date_of_case'].min(), df['date_of_case'].max()])
-    filtered_df = df[(df['date_of_case'] >= min_date) & (df['date_of_case'] <= max_date)]
-    categories = st.sidebar.multiselect("Catégories de Produits", sorted(df['prodcat'].unique()))
+
+    # Obtenir les années et semaines min/max des données
+    min_year, max_year = df['date_of_case'].dt.year.min(), df['date_of_case'].dt.year.max()
+    min_week, max_week = df['date_of_case'].dt.isocalendar().week.min(), df['date_of_case'].dt.isocalendar().week.max()
+
+    # Sélection des années et semaines
+    selected_year = st.sidebar.selectbox("Année", list(range(min_year, max_year + 1)))
+    selected_start_week, selected_end_week = st.sidebar.select_slider(
+        "Semaine (Plage)",
+        options=list(range(1, 54)),
+        value=(min_week, max_week)
+    )
+
+    # Filtrer les données par semaine et année
+    filtered_df = df[df['date_of_case'].dt.year == selected_year]
+    filtered_df = filtered_df[
+        (filtered_df['date_of_case'].dt.isocalendar().week >= selected_start_week) &
+        (filtered_df['date_of_case'].dt.isocalendar().week <= selected_end_week)
+    ]
+
+    # Filtre sur les catégories de produits
+    categories = st.sidebar.multiselect("Catégories de Produits", sorted(df['prodcat'].dropna().unique()))
     if categories:
         filtered_df = filtered_df[filtered_df['prodcat'].isin(categories)]
-    hazards = st.sidebar.multiselect("Catégories de Dangers", sorted(df['hazcat'].unique()))
+
+    # Filtre sur les catégories de dangers
+    hazards = st.sidebar.multiselect("Catégories de Dangers", sorted(df['hazcat'].dropna().unique()))
     if hazards:
         filtered_df = filtered_df[filtered_df['hazcat'].isin(hazards)]
+
+    # Affichage des données filtrées
     st.dataframe(filtered_df)
 
 # Tableau de Bord
