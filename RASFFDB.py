@@ -29,8 +29,19 @@ WEEKLY_COLUMN_MAPPING = {
 PRODUCT_CATEGORY_MAPPING = {
     "alcoholic beverages": ["Alcoholic Beverages", "Beverages"],
     "animal by-products": ["Animal By-products", "Animal Products"],
+    "bivalve molluscs and products thereof": ["Bivalve Molluscs", "Seafood"],
+    "cereals and bakery products": ["Cereals and Bakery Products", "Grains and Bakery"],
+    "dietetic foods, food supplements and fortified foods": ["Dietetic Foods and Supplements", "Specialty Foods"],
+    "eggs and egg products": ["Eggs and Egg Products", "Animal Products"],
+    "fats and oils": ["Fats and Oils", "Fats and Oils"],
     "fruits and vegetables": ["Fruits and Vegetables", "Fruits and Vegetables"],
+    "milk and milk products": ["Milk and Milk Products", "Dairy"],
+    "nuts, nut products and seeds": ["Nuts and Seeds", "Seeds and Nuts"],
+    "poultry meat and poultry meat products": ["Poultry Meat", "Meat Products"],
     "prepared dishes and snacks": ["Prepared Dishes and Snacks", "Prepared Foods"],
+    "soups, broths, sauces and condiments": ["Soups, Broths, Sauces", "Prepared Foods"],
+    "non-alcoholic beverages": ["Non-Alcoholic Beverages", "Beverages"],
+    "wine": ["Wine", "Beverages"],
     # Ajoutez les autres catégories ici
 }
 
@@ -38,7 +49,12 @@ PRODUCT_CATEGORY_MAPPING = {
 HAZARD_CATEGORY_MAPPING = {
     "adulteration / fraud": ["Adulteration / Fraud", "Food Fraud"],
     "allergens": ["Allergens", "Biological Hazard"],
+    "biological contaminants": ["Biological Contaminants", "Biological Hazard"],
+    "chemical contamination (other)": ["Chemical Contamination", "Chemical Hazard"],
     "pathogenic micro-organisms": ["Pathogenic Micro-organisms", "Biological Hazard"],
+    "pesticide residues": ["Pesticide Residues", "Pesticide Hazard"],
+    "heavy metals": ["Heavy Metals", "Chemical Hazard"],
+    "mycotoxins": ["Mycotoxins", "Biological Hazard"],
     # Ajoutez les autres catégories ici
 }
 
@@ -62,9 +78,14 @@ def get_last_week_in_db():
     connection.close()
 
     if result:
-        last_date = datetime.strptime(result, "%Y-%m-%d")
-        return last_date.isocalendar()[:2]  # Renvoie (année, semaine)
-    return (2024, 1)  # Point de départ par défaut
+        try:
+            last_date = datetime.strptime(result, "%Y-%m-%d")
+            return last_date.isocalendar()[:2]  # Renvoie (année, semaine)
+        except ValueError:
+            st.warning("La colonne 'date_of_case' contient des valeurs mal formatées.")
+            return (2024, 1)  # Valeur par défaut si le format est incorrect
+    else:
+        return (2024, 1)  # Point de départ par défaut si aucune donnée n'est présente
 
 # Nettoyer et mapper les données
 def clean_and_map_data(df):
@@ -72,6 +93,8 @@ def clean_and_map_data(df):
     for col in HEADERS:
         if col not in df.columns:
             df[col] = None
+    # Convertir et valider 'date_of_case'
+    df["date_of_case"] = pd.to_datetime(df["date_of_case"], errors="coerce").dt.strftime("%Y-%m-%d")
     df["prodcat"] = df["product_category"].apply(
         lambda x: PRODUCT_CATEGORY_MAPPING.get(x.lower(), ["Unknown", "Unknown"])[0] if pd.notnull(x) else "Unknown"
     )
