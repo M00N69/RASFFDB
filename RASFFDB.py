@@ -5,6 +5,10 @@ import requests
 from datetime import datetime
 import os
 from github import Github
+import plotly.express as px
+import seaborn as sns
+import matplotlib.pyplot as plt
+from scipy.stats import chi2_contingency
 
 # Configuration
 DB_FILE = "rasff_data.db"
@@ -30,6 +34,7 @@ PRODUCT_CATEGORY_MAPPING = {
     "alcoholic beverages": ["Alcoholic Beverages", "Beverages"],
     "animal by-products": ["Animal By-products", "Animal Products"],
     "bivalve molluscs and products thereof": ["Bivalve Molluscs", "Seafood"],
+    "cephalopods and products thereof": ["Cephalopods", "Seafood"],
     "cereals and bakery products": ["Cereals and Bakery Products", "Grains and Bakery"],
     "dietetic foods, food supplements and fortified foods": ["Dietetic Foods and Supplements", "Specialty Foods"],
     "eggs and egg products": ["Eggs and Egg Products", "Animal Products"],
@@ -42,7 +47,6 @@ PRODUCT_CATEGORY_MAPPING = {
     "soups, broths, sauces and condiments": ["Soups, Broths, Sauces", "Prepared Foods"],
     "non-alcoholic beverages": ["Non-Alcoholic Beverages", "Beverages"],
     "wine": ["Wine", "Beverages"],
-    # Ajoutez les autres catégories ici
 }
 
 # Mappings des catégories de dangers
@@ -55,7 +59,6 @@ HAZARD_CATEGORY_MAPPING = {
     "pesticide residues": ["Pesticide Residues", "Pesticide Hazard"],
     "heavy metals": ["Heavy Metals", "Chemical Hazard"],
     "mycotoxins": ["Mycotoxins", "Biological Hazard"],
-    # Ajoutez les autres catégories ici
 }
 
 # Initialiser la base de données
@@ -69,23 +72,6 @@ def initialize_database():
     """)
     connection.commit()
     connection.close()
-
-# Obtenir la dernière semaine dans la base de données
-def get_last_week_in_db():
-    connection = sqlite3.connect(DB_FILE)
-    query = "SELECT MAX(date_of_case) FROM rasff_data"
-    result = pd.read_sql_query(query, connection).iloc[0, 0]
-    connection.close()
-
-    if result:
-        try:
-            last_date = datetime.strptime(result, "%Y-%m-%d")
-            return last_date.isocalendar()[:2]  # Renvoie (année, semaine)
-        except ValueError:
-            st.warning("La colonne 'date_of_case' contient des valeurs mal formatées.")
-            return (2024, 1)  # Valeur par défaut si le format est incorrect
-    else:
-        return (2024, 1)  # Point de départ par défaut si aucune donnée n'est présente
 
 # Nettoyer et mapper les données
 def clean_and_map_data(df):
@@ -109,49 +95,19 @@ def clean_and_map_data(df):
     )
     return df[HEADERS]
 
-# Télécharger et traiter les données pour une semaine
-def download_and_process_data(year, week):
-    url_template = "https://www.sirene-diffusion.fr/regia/000-rasff/{}/rasff-{}-{}.xls"
-    url = url_template.format(str(year)[-2:], year, f"{week:02d}")
-    try:
-        response = requests.get(url)
-        if response.status_code == 200:
-            df = pd.read_excel(response.content)
-            return clean_and_map_data(df)
-        else:
-            st.warning(f"Échec du téléchargement pour {year} Semaine {week} (code {response.status_code}).")
-    except Exception as e:
-        st.error(f"Erreur lors du téléchargement : {e}")
-    return None
+# Charger les données de la base SQLite
+@st.cache_data
+def load_data_from_db():
+    connection = sqlite3.connect(DB_FILE)
+    df = pd.read_sql_query("SELECT * FROM rasff_data", connection)
+    connection.close()
+    df["date_of_case"] = pd.to_datetime(df["date_of_case"], errors="coerce")
+    return df
 
-# Sauvegarder dans la base de données
-def save_to_database(data):
-    if data is not None:
-        connection = sqlite3.connect(DB_FILE)
-        data.to_sql("rasff_data", connection, if_exists="append", index=False)
-        connection.close()
-
-# Charger toutes les semaines manquantes jusqu'à la semaine courante
-def load_missing_weeks():
-    last_year, last_week = get_last_week_in_db()
-    current_year, current_week = datetime.now().isocalendar()[:2]
-
-    with st.spinner("Chargement des données manquantes..."):
-        for year in range(last_year, current_year + 1):
-            start_week = last_week + 1 if year == last_year else 1
-            end_week = current_week if year == current_year else 53
-
-            for week in range(start_week, end_week + 1):
-                data = download_and_process_data(year, week)
-                if data is not None:
-                    save_to_database(data)
-
-        st.success("Toutes les semaines manquantes ont été chargées !")
-
-# Pousser la base de données vers GitHub
+# Pousser le fichier .db sur GitHub
 def push_db_to_github():
-    token = os.getenv("GITHUB_TOKEN")
-    repo_name = "M00N69/RASFFDB"
+    token = os.getenv("GITHUB_TOKEN")  # Configurez votre token dans Streamlit Cloud
+    repo_name = "M00N69/RASFFDB"  # Remplacez par votre dépôt GitHub
     file_path = DB_FILE
 
     try:
@@ -167,27 +123,86 @@ def push_db_to_github():
         except:
             repo.create_file(file_path, "Ajout initial de la base de données", content)
 
-        st.success("La base de données a été mise à jour sur GitHub.")
+        st.success("Le fichier .db a été mis à jour sur GitHub.")
     except Exception as e:
         st.error(f"Erreur lors de la mise à jour sur GitHub : {e}")
 
-# Interface Streamlit
-st.title("RASFF Data Manager")
+# Afficher les statistiques clés
+def display_statistics(df: pd.DataFrame):
+    st.header("Statistiques Clés")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Notifications Totales", len(df))
+    col2.metric("Catégories de Produits", df['prodcat'].nunique())
+    col3.metric("Catégories de Dangers", df['hazcat'].nunique())
 
-menu = st.sidebar.selectbox("Menu", ["Afficher les données", "Charger les semaines manquantes", "Pousser le fichier vers GitHub"])
+# Visualisations interactives avec Plotly
+def display_visualizations(df: pd.DataFrame):
+    st.header("Visualisations")
+    fig_product = px.bar(
+        df['prodcat'].value_counts(),
+        x=df['prodcat'].value_counts().index,
+        y=df['prodcat'].value_counts().values,
+        labels={"x": "Catégories de Produits", "y": "Nombre"},
+        title="Répartition des Catégories de Produits"
+    )
+    st.plotly_chart(fig_product)
 
-initialize_database()
+    fig_hazard = px.pie(
+        df['hazcat'].value_counts(),
+        values=df['hazcat'].value_counts().values,
+        names=df['hazcat'].value_counts().index,
+        title="Répartition des Catégories de Dangers"
+    )
+    st.plotly_chart(fig_hazard)
 
-if menu == "Afficher les données":
-    connection = sqlite3.connect(DB_FILE)
-    df = pd.read_sql_query("SELECT * FROM rasff_data", connection)
-    connection.close()
-    st.dataframe(df)
+# Analyse statistique avec Chi2
+def perform_statistical_analysis(df: pd.DataFrame):
+    st.title("Analyse Statistique : Test Chi2")
+    contingency_table = pd.crosstab(df['prodcat'], df['hazcat'])
+    st.write("Table de Contingence", contingency_table)
 
-elif menu == "Charger les semaines manquantes":
-    if st.button("Charger les données manquantes"):
-        load_missing_weeks()
+    chi2_stat, p_value, dof, expected = chi2_contingency(contingency_table)
+    st.write(f"**Chi2 Statistique**: {chi2_stat:.2f}")
+    st.write(f"**P-value**: {p_value:.4f}")
 
-elif menu == "Pousser le fichier vers GitHub":
-    if st.button("Pousser le fichier .db"):
-        push_db_to_github()
+    if p_value < 0.05:
+        st.success("Résultat statistiquement significatif (P-value < 0.05).")
+    else:
+        st.warning("Résultat non significatif (P-value >= 0.05).")
+
+    st.subheader("Heatmap : Produits vs Dangers")
+    fig, ax = plt.subplots(figsize=(12, 8))
+    sns.heatmap(contingency_table, annot=True, cmap="coolwarm", fmt="d", ax=ax)
+    st.pyplot(fig)
+
+# Main
+def main():
+    st.title("RASFF Data Analysis and Management")
+
+    # Initialiser la base de données
+    initialize_database()
+
+    # Charger les données
+    df = load_data_from_db()
+
+    # Navigation
+    menu = st.sidebar.selectbox(
+        "Menu",
+        ["Dashboard", "Analyse Statistique", "Pousser vers GitHub"]
+    )
+
+    if menu == "Dashboard":
+        st.header("Tableau de Bord")
+        display_statistics(df)
+        display_visualizations(df)
+
+    elif menu == "Analyse Statistique":
+        st.header("Analyse Statistique")
+        perform_statistical_analysis(df)
+
+    elif menu == "Pousser vers GitHub":
+        if st.button("Pousser le fichier .db vers GitHub"):
+            push_db_to_github()
+
+if __name__ == "__main__":
+    main()
