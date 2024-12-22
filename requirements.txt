@@ -3,3 +3,8 @@ pandas
 openpyxl
 requests
 PyGithub
+plotly
+seaborn
+matplotlib
+scipy
+
