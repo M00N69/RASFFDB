@@ -181,7 +181,7 @@ def view_database(df: pd.DataFrame):
     df['week'] = df['date_of_case'].dt.isocalendar().week
     min_year, max_year = df['year'].min(), df['year'].max()
 
-    selected_year = st.sidebar.selectbox("Année", list(range(min_year, max_year + 1)))
+    selected_year = st.sidebar.selectbox("Année", list(range(int(min_year), int(max_year) + 1)))
     selected_weeks = st.sidebar.slider("Semaines", 1, 53, (1, 53))
 
     filtered_df = df[(df['year'] == selected_year) &
@@ -198,6 +198,27 @@ def view_database(df: pd.DataFrame):
 
     st.dataframe(filtered_df)
 
+# Tableau de bord
+def display_dashboard(df: pd.DataFrame):
+    st.header("Tableau de Bord")
+
+    # Statistiques clés
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Notifications Totales", len(df))
+    col2.metric("Catégories de Produits", df['prodcat'].nunique())
+    col3.metric("Catégories de Dangers", df['hazcat'].nunique())
+
+    # Graphiques interactifs
+    product_counts = df['prodcat'].value_counts().head(10)
+    fig_prod = px.bar(product_counts, x=product_counts.index, y=product_counts.values,
+                      labels={"x": "Produits", "y": "Nombre"}, title="Top 10 Catégories de Produits")
+    st.plotly_chart(fig_prod)
+
+    hazard_counts = df['hazcat'].value_counts().head(10)
+    fig_hazard = px.pie(hazard_counts, values=hazard_counts.values, names=hazard_counts.index,
+                        title="Répartition des Catégories de Dangers")
+    st.plotly_chart(fig_hazard)
+
 # Main
 def main():
     initialize_database()
@@ -210,13 +231,22 @@ def main():
 
     if menu == "Tableau de Bord":
         st.title("Tableau de Bord")
-        display_dashboard(df)
+        if df.empty:
+            st.warning("Aucune donnée disponible. Veuillez mettre à jour la base de données.")
+        else:
+            display_dashboard(df)
     elif menu == "Base de Données":
-        view_database(df)
+        st.title("Base de Données")
+        if df.empty:
+            st.warning("Aucune donnée disponible. Veuillez mettre à jour la base de données.")
+        else:
+            view_database(df)
     elif menu == "Mise à Jour":
+        st.title("Mise à Jour des Données")
         if st.button("Mettre à jour la base de données"):
             update_database()
     elif menu == "Synchronisation GitHub":
+        st.title("Synchronisation GitHub")
         if st.button("Pousser le fichier .db vers GitHub"):
             push_db_to_github()
 
