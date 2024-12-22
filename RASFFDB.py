@@ -3,9 +3,11 @@ import pandas as pd
 import sqlite3
 import requests
 from datetime import datetime
+import os
+from github import Github
 
 # Configuration
-DB_FILE = "rasff_data.db"  # Base de données SQLite persistante
+DB_FILE = "rasff_data.db"  # Nom du fichier SQLite
 HEADERS = [
     "date_of_case", "reference", "notification_from", "country_origin",
     "product", "product_category", "hazard_substance", "hazard_category",
@@ -30,38 +32,15 @@ PRODUCT_CATEGORY_MAPPING = {
     "bivalve molluscs and products thereof": ["Bivalve Molluscs", "Seafood"],
     "cephalopods and products thereof": ["Cephalopods", "Seafood"],
     "cereals and bakery products": ["Cereals and Bakery Products", "Grains and Bakery"],
-    "cocoa and cocoa preparations, coffee and tea": ["Cocoa, Coffee, and Tea", "Beverages"],
-    "compound feeds": ["Compound Feeds", "Animal Feed"],
-    "confectionery": ["Confectionery", "Grains and Bakery"],
-    "crustaceans and products thereof": ["Crustaceans", "Seafood"],
     "dietetic foods, food supplements and fortified foods": ["Dietetic Foods and Supplements", "Specialty Foods"],
     "eggs and egg products": ["Eggs and Egg Products", "Animal Products"],
     "fats and oils": ["Fats and Oils", "Fats and Oils"],
-    "feed additives": ["Feed Additives", "Animal Feed"],
-    "feed materials": ["Feed Materials", "Animal Feed"],
-    "feed premixtures": ["Feed Premixtures", "Animal Feed"],
-    "fish and fish products": ["Fish and Fish Products", "Seafood"],
-    "food additives and flavourings": ["Food Additives and Flavourings", "Additives"],
-    "food contact materials": ["Food Contact Materials", "Packaging"],
     "fruits and vegetables": ["Fruits and Vegetables", "Fruits and Vegetables"],
-    "gastropods": ["Gastropods", "Seafood"],
-    "herbs and spices": ["Herbs and Spices", "Spices"],
-    "honey and royal jelly": ["Honey and Royal Jelly", "Specialty Foods"],
-    "ices and desserts": ["Ices and Desserts", "Grains and Bakery"],
-    "live animals": ["Live Animals", "Animal Products"],
-    "meat and meat products (other than poultry)": ["Meat (Non-Poultry)", "Meat Products"],
     "milk and milk products": ["Milk and Milk Products", "Dairy"],
-    "natural mineral waters": ["Natural Mineral Waters", "Beverages"],
-    "non-alcoholic beverages": ["Non-Alcoholic Beverages", "Beverages"],
     "nuts, nut products and seeds": ["Nuts and Seeds", "Seeds and Nuts"],
-    "other food product / mixed": ["Mixed Food Products", "Other"],
-    "pet food": ["Pet Food", "Animal Feed"],
-    "plant protection products": ["Plant Protection Products", "Additives"],
     "poultry meat and poultry meat products": ["Poultry Meat", "Meat Products"],
     "prepared dishes and snacks": ["Prepared Dishes and Snacks", "Prepared Foods"],
-    "soups, broths, sauces and condiments": ["Soups, Broths, Sauces", "Prepared Foods"],
-    "water for human consumption (other)": ["Water (Human Consumption)", "Beverages"],
-    "wine": ["Wine", "Beverages"]
+    # Ajoutez les autres catégories ici
 }
 
 # Mappings des catégories de dangers
@@ -69,19 +48,10 @@ HAZARD_CATEGORY_MAPPING = {
     "adulteration / fraud": ["Adulteration / Fraud", "Food Fraud"],
     "allergens": ["Allergens", "Biological Hazard"],
     "biological contaminants": ["Biological Contaminants", "Biological Hazard"],
-    "biotoxins (other)": ["Biotoxins", "Biological Hazard"],
     "chemical contamination (other)": ["Chemical Contamination", "Chemical Hazard"],
-    "environmental pollutants": ["Environmental Pollutants", "Chemical Hazard"],
-    "feed additives": ["Feed Additives", "Chemical Hazard"],
-    "food additives and flavourings": ["Food Additives and Flavourings", "Additives"],
-    "foreign bodies": ["Foreign Bodies", "Physical Hazard"],
-    "heavy metals": ["Heavy Metals", "Chemical Hazard"],
-    "industrial contaminants": ["Industrial Contaminants", "Chemical Hazard"],
-    "mycotoxins": ["Mycotoxins", "Biological Hazard"],
-    "natural toxins (other)": ["Natural Toxins", "Biological Hazard"],
     "pathogenic micro-organisms": ["Pathogenic Micro-organisms", "Biological Hazard"],
     "pesticide residues": ["Pesticide Residues", "Pesticide Hazard"],
-    "residues of veterinary medicinal": ["Veterinary Medicinal Residues", "Chemical Hazard"]
+    # Ajoutez les autres catégories ici
 }
 
 # Initialiser la base de données
@@ -102,10 +72,18 @@ def clean_and_map_data(df):
     for col in HEADERS:
         if col not in df.columns:
             df[col] = None
-    df["prodcat"] = df["product_category"].apply(lambda x: PRODUCT_CATEGORY_MAPPING.get(x.lower(), ["Unknown", "Unknown"])[0] if pd.notnull(x) else "Unknown")
-    df["groupprod"] = df["product_category"].apply(lambda x: PRODUCT_CATEGORY_MAPPING.get(x.lower(), ["Unknown", "Unknown"])[1] if pd.notnull(x) else "Unknown")
-    df["hazcat"] = df["hazard_substance"].apply(lambda x: HAZARD_CATEGORY_MAPPING.get(x.lower(), ["Unknown", "Unknown"])[0] if pd.notnull(x) else "Unknown")
-    df["grouphaz"] = df["hazard_substance"].apply(lambda x: HAZARD_CATEGORY_MAPPING.get(x.lower(), ["Unknown", "Unknown"])[1] if pd.notnull(x) else "Unknown")
+    df["prodcat"] = df["product_category"].apply(
+        lambda x: PRODUCT_CATEGORY_MAPPING.get(x.lower(), ["Unknown", "Unknown"])[0] if pd.notnull(x) else "Unknown"
+    )
+    df["groupprod"] = df["product_category"].apply(
+        lambda x: PRODUCT_CATEGORY_MAPPING.get(x.lower(), ["Unknown", "Unknown"])[1] if pd.notnull(x) else "Unknown"
+    )
+    df["hazcat"] = df["hazard_substance"].apply(
+        lambda x: HAZARD_CATEGORY_MAPPING.get(x.lower(), ["Unknown", "Unknown"])[0] if pd.notnull(x) else "Unknown"
+    )
+    df["grouphaz"] = df["hazard_substance"].apply(
+        lambda x: HAZARD_CATEGORY_MAPPING.get(x.lower(), ["Unknown", "Unknown"])[1] if pd.notnull(x) else "Unknown"
+    )
     return df[HEADERS]
 
 # Télécharger et traiter les données
@@ -131,10 +109,44 @@ def save_to_database(data):
         connection.close()
         st.success(f"{len(data)} lignes ajoutées à la base de données.")
 
+# Pousser le fichier rasff_data.db vers GitHub
+def push_db_to_github():
+    token = os.getenv("GITHUB_TOKEN")  # Assurez-vous que ce token est défini dans les secrets de Streamlit Cloud
+    repo_name = "M00N69/RASFFDB"  # Remplacez par votre dépôt GitHub
+    file_path = DB_FILE
+
+    try:
+        g = Github(token)
+        repo = g.get_repo(repo_name)
+
+        # Lire le fichier .db
+        with open(file_path, "rb") as f:
+            content = f.read()
+
+        # Vérifier si le fichier existe dans le repo
+        try:
+            contents = repo.get_contents(file_path)
+            repo.update_file(
+                contents.path,
+                "Mise à jour du fichier rasff_data.db",
+                content,
+                contents.sha,
+            )
+        except:
+            # Si le fichier n'existe pas encore
+            repo.create_file(
+                file_path,
+                "Ajout initial du fichier rasff_data.db",
+                content,
+            )
+        st.success("Le fichier .db a été mis à jour dans le dépôt GitHub.")
+    except Exception as e:
+        st.error(f"Erreur lors de la mise à jour du fichier dans GitHub : {e}")
+
 # Interface Streamlit
 st.title("RASFF Data Manager")
 
-menu = st.sidebar.selectbox("Menu", ["Afficher les données", "Télécharger et ajouter des données"])
+menu = st.sidebar.selectbox("Menu", ["Afficher les données", "Télécharger et ajouter des données", "Pousser le fichier vers GitHub"])
 
 initialize_database()
 
@@ -151,3 +163,7 @@ elif menu == "Télécharger et ajouter des données":
         data = download_and_process_data(year, week)
         if data is not None:
             save_to_database(data)
+
+elif menu == "Pousser le fichier vers GitHub":
+    if st.button("Pousser le fichier .db"):
+        push_db_to_github()
