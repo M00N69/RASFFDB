@@ -42,37 +42,43 @@ HAZARD_CATEGORY_MAPPING = {
 
 # Initialiser la base de données
 def initialize_database():
-    connection = sqlite3.connect(DB_FILE)
-    cursor = connection.cursor()
-    cursor.execute(f"""
-        CREATE TABLE IF NOT EXISTS rasff_data (
-            {', '.join([f'{col} TEXT' for col in HEADERS])}
-        )
-    """)
-    connection.commit()
-    connection.close()
+    """
+    Initialise la base de données SQLite en créant la table 'rasff_data' si elle n'existe pas.
+    """
+    with sqlite3.connect(DB_FILE) as connection:
+        cursor = connection.cursor()
+        cursor.execute(f"""
+            CREATE TABLE IF NOT EXISTS rasff_data (
+                {', '.join([f'{col} TEXT' for col in HEADERS])}
+            )
+        """)
+        connection.commit()
 
 # Charger les données de la base SQLite
 @st.cache_data
 def load_data_from_db():
-    connection = sqlite3.connect(DB_FILE)
-    df = pd.read_sql_query("SELECT * FROM rasff_data", connection)
-    connection.close()
+    """
+    Charge les données de la base de données SQLite dans un DataFrame pandas.
+    """
+    with sqlite3.connect(DB_FILE) as connection:
+        df = pd.read_sql_query("SELECT * FROM rasff_data", connection)
     if 'date_of_case' in df.columns:
         df['date_of_case'] = pd.to_datetime(df['date_of_case'], errors='coerce')
     return df
 
 # Obtenir la dernière semaine dans la base de données
 def get_last_week_in_db():
-    connection = sqlite3.connect(DB_FILE)
-    query = "SELECT MAX(date_of_case) FROM rasff_data"
-    result = pd.read_sql_query(query, connection).iloc[0, 0]
-    connection.close()
+    """
+    Récupère la dernière semaine de données disponible dans la base de données.
+    """
+    with sqlite3.connect(DB_FILE) as connection:
+        query = "SELECT MAX(date_of_case) FROM rasff_data"
+        result = pd.read_sql_query(query, connection).iloc[0, 0]
 
     if result:
         try:
             last_date = pd.to_datetime(result)
-            return last_date.isocalendar()[:2]  # Renvoie (année, semaine)
+            return last_date.isocalendar().year, last_date.isocalendar().week
         except ValueError:
             st.warning("Erreur dans le format de la date dans la base.")
             return (2024, 1)  # Valeur par défaut
@@ -81,21 +87,27 @@ def get_last_week_in_db():
 
 # Télécharger et traiter les données pour une semaine donnée
 def download_and_process_data(year, week):
+    """
+    Télécharge et traite les données RASFF pour une année et une semaine spécifiques.
+    """
     url_template = "https://www.sirene-diffusion.fr/regia/000-rasff/{}/rasff-{}-{}.xls"
     url = url_template.format(str(year)[-2:], year, f"{week:02d}")
     try:
         response = requests.get(url)
-        if response.status_code == 200:
-            df = pd.read_excel(response.content)
-            return clean_and_map_data(df)
-        else:
-            st.warning(f"Échec du téléchargement pour {year}, semaine {week}.")
+        response.raise_for_status()  # Lève une exception pour les codes d'état HTTP non réussis
+        df = pd.read_excel(response.content)
+        return clean_and_map_data(df)
+    except requests.exceptions.RequestException as e:
+        st.warning(f"Échec du téléchargement pour {year}, semaine {week}. Erreur : {e}")
     except Exception as e:
-        st.error(f"Erreur lors du téléchargement : {e}")
+        st.error(f"Erreur lors du traitement des données : {e}")
     return None
 
 # Nettoyer et mapper les données
 def clean_and_map_data(df):
+    """
+    Nettoie et mappe les colonnes du DataFrame selon les mappings définis.
+    """
     df.rename(columns={
         "Date of Case": "date_of_case",
         "Reference": "reference",
@@ -125,6 +137,9 @@ def clean_and_map_data(df):
 
 # Mettre à jour la base avec les semaines manquantes
 def update_database():
+    """
+    Met à jour la base de données avec les données manquantes jusqu'à la semaine actuelle.
+    """
     last_year, last_week = get_last_week_in_db()
     current_year, current_week = datetime.now().isocalendar()[:2]
 
@@ -140,13 +155,18 @@ def update_database():
 
 # Sauvegarder dans la base SQLite
 def save_to_database(data):
+    """
+    Sauvegarde les données dans la base de données SQLite.
+    """
     if data is not None:
-        connection = sqlite3.connect(DB_FILE)
-        data.to_sql("rasff_data", connection, if_exists="append", index=False)
-        connection.close()
+        with sqlite3.connect(DB_FILE) as connection:
+            data.to_sql("rasff_data", connection, if_exists="append", index=False)
 
 # Synchroniser avec GitHub
 def push_db_to_github():
+    """
+    Synchronise la base de données avec un dépôt GitHub.
+    """
     token = os.getenv("GITHUB_TOKEN")
     repo_name = "M00N69/RASFFDB"
     file_path = DB_FILE
@@ -161,7 +181,7 @@ def push_db_to_github():
         try:
             contents = repo.get_contents(file_path)
             repo.update_file(contents.path, "Mise à jour de la base de données", content, contents.sha)
-        except:
+        except Exception as e:
             repo.create_file(file_path, "Ajout initial de la base de données", content)
 
         st.success("Le fichier .db a été mis à jour sur GitHub.")
@@ -170,6 +190,9 @@ def push_db_to_github():
 
 # Vue Base de Données avec Filtres
 def view_database(df: pd.DataFrame):
+    """
+    Affiche la base de données avec des filtres interactifs.
+    """
     st.header("Base de Données")
     st.sidebar.header("Filtres")
 
@@ -200,6 +223,9 @@ def view_database(df: pd.DataFrame):
 
 # Tableau de bord
 def display_dashboard(df: pd.DataFrame):
+    """
+    Affiche un tableau de bord interactif avec des statistiques et des graphiques.
+    """
     st.header("Tableau de Bord")
 
     # Statistiques clés
@@ -211,16 +237,20 @@ def display_dashboard(df: pd.DataFrame):
     # Graphiques interactifs
     product_counts = df['prodcat'].value_counts().head(10)
     fig_prod = px.bar(product_counts, x=product_counts.index, y=product_counts.values,
-                      labels={"x": "Produits", "y": "Nombre"}, title="Top 10 Catégories de Produits")
+                      labels={"x": "Produits", "y": "Nombre"}, title="Top 10 Catégories de Produits",
+                      color=product_counts.index, text_auto=True)
     st.plotly_chart(fig_prod)
 
     hazard_counts = df['hazcat'].value_counts().head(10)
     fig_hazard = px.pie(hazard_counts, values=hazard_counts.values, names=hazard_counts.index,
-                        title="Répartition des Catégories de Dangers")
+                        title="Répartition des Catégories de Dangers", hole=0.3)
     st.plotly_chart(fig_hazard)
 
 # Main
 def main():
+    """
+    Fonction principale pour exécuter l'application Streamlit.
+    """
     initialize_database()
     df = load_data_from_db()
 
