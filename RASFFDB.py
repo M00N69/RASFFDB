@@ -163,13 +163,15 @@ def clean_and_map_data(df):
         if col not in df.columns:
             df[col] = None
 
-    # Appliquer les mappings pour les catégories de produits et de dangers
+    # Appliquer les mappings pour les catégories de produits
     df["prodcat"] = df["product_category"].apply(
         lambda x: PRODUCT_CATEGORY_MAPPING.get(str(x).lower(), ["Unknown", "Unknown"])[0] if pd.notnull(x) else "Unknown"
     )
     df["groupprod"] = df["product_category"].apply(
         lambda x: PRODUCT_CATEGORY_MAPPING.get(str(x).lower(), ["Unknown", "Unknown"])[1] if pd.notnull(x) else "Unknown"
     )
+
+    # Appliquer les mappings pour les catégories de dangers
     df["hazard_category"] = df["hazard_substance"].apply(
         lambda x: HAZARD_CATEGORY_MAPPING.get(str(x).lower(), ["Unknown", "Unknown"])[0] if pd.notnull(x) else "Unknown"
     )
