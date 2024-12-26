@@ -6,38 +6,85 @@ from datetime import datetime
 import os
 from github import Github
 import plotly.express as px
-from scipy.stats import chi2_contingency
-import seaborn as sns
-import matplotlib.pyplot as plt
 
 # Configuration
-st.set_page_config(page_title="RASFF Data Manager", layout="wide")
-DB_FILE = "rasff_data.db"
+DB_FILE = "rasff_data.db"  # Base de données SQLite persistante
 HEADERS = [
     "date_of_case", "reference", "notification_from", "country_origin",
     "product", "product_category", "hazard_substance", "hazard_category",
     "prodcat", "groupprod", "hazcat", "grouphaz"
 ]
 
+# Mappings des colonnes entre les fichiers Excel et le format attendu
+WEEKLY_COLUMN_MAPPING = {
+    "date": "date_of_case",
+    "reference": "reference",
+    "notifying_country": "notification_from",
+    "origin": "country_origin",
+    "subject": "product",
+    "category": "product_category",
+    "hazards": "hazard_substance"
+}
+
 # Mappings des catégories de produits
 PRODUCT_CATEGORY_MAPPING = {
     "alcoholic beverages": ["Alcoholic Beverages", "Beverages"],
     "animal by-products": ["Animal By-products", "Animal Products"],
-    "seafood": ["Fish and Seafood", "Seafood"],
+    "bivalve molluscs and products thereof": ["Bivalve Molluscs", "Seafood"],
+    "cephalopods and products thereof": ["Cephalopods", "Seafood"],
     "cereals and bakery products": ["Cereals and Bakery Products", "Grains and Bakery"],
+    "cocoa and cocoa preparations, coffee and tea": ["Cocoa, Coffee, and Tea", "Beverages"],
+    "compound feeds": ["Compound Feeds", "Animal Feed"],
+    "confectionery": ["Confectionery", "Grains and Bakery"],
+    "crustaceans and products thereof": ["Crustaceans", "Seafood"],
+    "dietetic foods, food supplements and fortified foods": ["Dietetic Foods and Supplements", "Specialty Foods"],
+    "eggs and egg products": ["Eggs and Egg Products", "Animal Products"],
+    "fats and oils": ["Fats and Oils", "Fats and Oils"],
+    "feed additives": ["Feed Additives", "Animal Feed"],
+    "feed materials": ["Feed Materials", "Animal Feed"],
+    "feed premixtures": ["Feed Premixtures", "Animal Feed"],
+    "fish and fish products": ["Fish and Fish Products", "Seafood"],
+    "food additives and flavourings": ["Food Additives and Flavourings", "Additives"],
+    "food contact materials": ["Food Contact Materials", "Packaging"],
+    "fruits and vegetables": ["Fruits and Vegetables", "Fruits and Vegetables"],
+    "gastropods": ["Gastropods", "Seafood"],
+    "herbs and spices": ["Herbs and Spices", "Spices"],
+    "honey and royal jelly": ["Honey and Royal Jelly", "Specialty Foods"],
+    "ices and desserts": ["Ices and Desserts", "Grains and Bakery"],
+    "live animals": ["Live Animals", "Animal Products"],
+    "meat and meat products (other than poultry)": ["Meat (Non-Poultry)", "Meat Products"],
     "milk and milk products": ["Milk and Milk Products", "Dairy"],
-    "nuts and seeds": ["Nuts and Seeds", "Seeds and Nuts"],
+    "natural mineral waters": ["Natural Mineral Waters", "Beverages"],
+    "non-alcoholic beverages": ["Non-Alcoholic Beverages", "Beverages"],
+    "nuts, nut products and seeds": ["Nuts and Seeds", "Seeds and Nuts"],
+    "other food product / mixed": ["Mixed Food Products", "Other"],
+    "pet food": ["Pet Food", "Animal Feed"],
+    "plant protection products": ["Plant Protection Products", "Additives"],
+    "poultry meat and poultry meat products": ["Poultry Meat", "Meat Products"],
     "prepared dishes and snacks": ["Prepared Dishes and Snacks", "Prepared Foods"],
-    "additives": ["Food Additives and Flavourings", "Additives"],
-    "fruits and vegetables": ["Fruits and Vegetables", "Fruits"],
+    "soups, broths, sauces and condiments": ["Soups, Broths, Sauces", "Prepared Foods"],
+    "water for human consumption (other)": ["Water (Human Consumption)", "Beverages"],
+    "wine": ["Wine", "Beverages"]
 }
 
 # Mappings des catégories de dangers
 HAZARD_CATEGORY_MAPPING = {
-    "food fraud": ["Adulteration / Fraud", "Food Fraud"],
-    "biological hazard": ["Pathogenic Micro-organisms", "Biological Hazard"],
-    "chemical hazard": ["Chemical Contamination", "Chemical Hazard"],
-    "physical hazard": ["Foreign Bodies", "Physical Hazard"],
+    "adulteration / fraud": ["Adulteration / Fraud", "Food Fraud"],
+    "allergens": ["Allergens", "Biological Hazard"],
+    "biological contaminants": ["Biological Contaminants", "Biological Hazard"],
+    "biotoxins (other)": ["Biotoxins", "Biological Hazard"],
+    "chemical contamination (other)": ["Chemical Contamination", "Chemical Hazard"],
+    "environmental pollutants": ["Environmental Pollutants", "Chemical Hazard"],
+    "feed additives": ["Feed Additives", "Chemical Hazard"],
+    "food additives and flavourings": ["Food Additives and Flavourings", "Additives"],
+    "foreign bodies": ["Foreign Bodies", "Physical Hazard"],
+    "heavy metals": ["Heavy Metals", "Chemical Hazard"],
+    "industrial contaminants": ["Industrial Contaminants", "Chemical Hazard"],
+    "mycotoxins": ["Mycotoxins", "Biological Hazard"],
+    "natural toxins (other)": ["Natural Toxins", "Biological Hazard"],
+    "pathogenic micro-organisms": ["Pathogenic Micro-organisms", "Biological Hazard"],
+    "pesticide residues": ["Pesticide Residues", "Pesticide Hazard"],
+    "residues of veterinary medicinal": ["Veterinary Medicinal Residues", "Chemical Hazard"]
 }
 
 # Initialiser la base de données
@@ -108,31 +155,31 @@ def clean_and_map_data(df):
     """
     Nettoie et mappe les colonnes du DataFrame selon les mappings définis.
     """
-    df.rename(columns={
-        "Date of Case": "date_of_case",
-        "Reference": "reference",
-        "Notification From": "notification_from",
-        "Country Origin": "country_origin",
-        "Product": "product",
-        "Product Category": "product_category",
-        "Hazard Substance": "hazard_substance",
-        "Hazard Category": "hazard_category"
-    }, inplace=True)
+    # Renommer les colonnes selon le mapping
+    df.rename(columns=WEEKLY_COLUMN_MAPPING, inplace=True)
+
+    # Ajouter les colonnes manquantes avec des valeurs par défaut
     for col in HEADERS:
         if col not in df.columns:
             df[col] = None
+
+    # Appliquer les mappings pour les catégories de produits et de dangers
     df["prodcat"] = df["product_category"].apply(
-        lambda x: PRODUCT_CATEGORY_MAPPING.get(str(x).lower(), ["Unknown", "Unknown"])[0]
+        lambda x: PRODUCT_CATEGORY_MAPPING.get(str(x).lower(), ["Unknown", "Unknown"])[0] if pd.notnull(x) else "Unknown"
     )
     df["groupprod"] = df["product_category"].apply(
-        lambda x: PRODUCT_CATEGORY_MAPPING.get(str(x).lower(), ["Unknown", "Unknown"])[1]
+        lambda x: PRODUCT_CATEGORY_MAPPING.get(str(x).lower(), ["Unknown", "Unknown"])[1] if pd.notnull(x) else "Unknown"
+    )
+    df["hazard_category"] = df["hazard_substance"].apply(
+        lambda x: HAZARD_CATEGORY_MAPPING.get(str(x).lower(), ["Unknown", "Unknown"])[0] if pd.notnull(x) else "Unknown"
     )
     df["hazcat"] = df["hazard_substance"].apply(
-        lambda x: HAZARD_CATEGORY_MAPPING.get(str(x).lower(), ["Unknown", "Unknown"])[0]
+        lambda x: HAZARD_CATEGORY_MAPPING.get(str(x).lower(), ["Unknown", "Unknown"])[0] if pd.notnull(x) else "Unknown"
     )
     df["grouphaz"] = df["hazard_substance"].apply(
-        lambda x: HAZARD_CATEGORY_MAPPING.get(str(x).lower(), ["Unknown", "Unknown"])[1]
+        lambda x: HAZARD_CATEGORY_MAPPING.get(str(x).lower(), ["Unknown", "Unknown"])[1] if pd.notnull(x) else "Unknown"
     )
+
     return df[HEADERS]
 
 # Mettre à jour la base avec les semaines manquantes
