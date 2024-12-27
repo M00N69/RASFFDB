@@ -15,51 +15,32 @@ DB_FILE = "rasff_data.db"  # Base de données SQLite persistante
 
 # Mappings des colonnes entre les fichiers Excel et le format attendu
 WEEKLY_COLUMN_MAPPING = {
-    "Date of Case": "date_of_case",
-    "Reference": "reference",
-    "Notification From": "notification_from",
-    "Country Origin": "country_origin",
-    "Product": "product",
-    "Product Category": "product_category",
-    "Hazard Substance": "hazard_substance",
-    "Hazard Category": "hazard_category"
+    "reference": "reference",
+    "category": "product_category",
+    "type": "product_type",
+    "subject": "subject",
+    "date": "date_of_case",
+    "notifying_country": "notification_from",
+    "classification": "classification",
+    "risk_decision": "risk_decision",
+    "distribution": "distribution",
+    "forAttention": "for_attention",
+    "forFollowUp": "for_follow_up",
+    "operator": "operator",
+    "origin": "country_origin",
+    "hazards": "hazard_substance"
 }
 
 # Mappings des catégories de produits
 PRODUCT_CATEGORY_MAPPING = {
-    "alcoholic beverages": ["Alcoholic Beverages", "Beverages"],
-    "animal by-products": ["Animal By-products", "Animal Products"],
-    "bivalve molluscs and products thereof": ["Bivalve Molluscs", "Seafood"],
-    "cephalopods and products thereof": ["Cephalopods", "Seafood"],
-    "cereals and bakery products": ["Cereals and Bakery Products", "Grains and Bakery"],
-    "cocoa and cocoa preparations, coffee and tea": ["Cocoa, Coffee, and Tea", "Beverages"],
-    "compound feeds": ["Compound Feeds", "Animal Feed"],
-    "confectionery": ["Confectionery", "Grains and Bakery"],
-    "crustaceans and products thereof": ["Crustaceans", "Seafood"],
-    "dietetic foods, food supplements and fortified foods": ["Dietetic Foods and Supplements", "Specialty Foods"],
-    "eggs and egg products": ["Eggs and Egg Products", "Animal Products"],
-    "fats and oils": ["Fats and Oils", "Fats and Oils"],
-    "feed additives": ["Feed Additives", "Animal Feed"],
-    "feed materials": ["Feed Materials", "Animal Feed"],
-    "feed premixtures": ["Feed Premixtures", "Animal Feed"],
-    "fish and fish products": ["Fish and Fish Products", "Seafood"],
-    "food additives and flavourings": ["Food Additives and Flavourings", "Additives"],
-    "food contact materials": ["Food Contact Materials", "Packaging"],
     "fruits and vegetables": ["Fruits and Vegetables", "Fruits and Vegetables"],
-    "gastropods": ["Gastropods", "Seafood"],
-    "herbs and spices": ["Herbs and Spices", "Spices"],
-    "honey and royal jelly": ["Honey and Royal Jelly", "Specialty Foods"],
-    "ices and desserts": ["Ices and Desserts", "Grains and Bakery"],
-    "live animals": ["Live Animals", "Animal Products"],
-    "meat and meat products (other than poultry)": ["Meat (Non-Poultry)", "Meat Products"],
-    "milk and milk products": ["Milk and Milk Products", "Dairy"],
-    "natural mineral waters": ["Natural Mineral Waters", "Beverages"],
-    "non-alcoholic beverages": ["Non-Alcoholic Beverages", "Beverages"],
+    "cocoa and cocoa preparations, coffee and tea": ["Cocoa, Coffee, and Tea", "Beverages"],
+    "dietetic foods, food supplements and fortified foods": ["Dietetic Foods and Supplements", "Specialty Foods"],
+    "poultry meat and poultry meat products": ["Poultry Meat", "Meat Products"],
     "nuts, nut products and seeds": ["Nuts and Seeds", "Seeds and Nuts"],
     "other food product / mixed": ["Mixed Food Products", "Other"],
     "pet food": ["Pet Food", "Animal Feed"],
     "plant protection products": ["Plant Protection Products", "Additives"],
-    "poultry meat and poultry meat products": ["Poultry Meat", "Meat Products"],
     "prepared dishes and snacks": ["Prepared Dishes and Snacks", "Prepared Foods"],
     "soups, broths, sauces and condiments": ["Soups, Broths, Sauces", "Prepared Foods"],
     "water for human consumption (other)": ["Water (Human Consumption)", "Beverages"],
@@ -68,22 +49,11 @@ PRODUCT_CATEGORY_MAPPING = {
 
 # Mappings des catégories de dangers
 HAZARD_CATEGORY_MAPPING = {
-    "adulteration / fraud": ["Adulteration / Fraud", "Food Fraud"],
-    "allergens": ["Allergens", "Biological Hazard"],
-    "biological contaminants": ["Biological Contaminants", "Biological Hazard"],
-    "biotoxins (other)": ["Biotoxins", "Biological Hazard"],
-    "chemical contamination (other)": ["Chemical Contamination", "Chemical Hazard"],
-    "environmental pollutants": ["Environmental Pollutants", "Chemical Hazard"],
-    "feed additives": ["Feed Additives", "Chemical Hazard"],
-    "food additives and flavourings": ["Food Additives and Flavourings", "Additives"],
-    "foreign bodies": ["Foreign Bodies", "Physical Hazard"],
-    "heavy metals": ["Heavy Metals", "Chemical Hazard"],
-    "industrial contaminants": ["Industrial Contaminants", "Chemical Hazard"],
-    "mycotoxins": ["Mycotoxins", "Biological Hazard"],
-    "natural toxins (other)": ["Natural Toxins", "Biological Hazard"],
-    "pathogenic micro-organisms": ["Pathogenic Micro-organisms", "Biological Hazard"],
-    "pesticide residues": ["Pesticide Residues", "Pesticide Hazard"],
-    "residues of veterinary medicinal": ["Veterinary Medicinal Residues", "Chemical Hazard"]
+    "Forchlorfenuron, chlorfenapyr": ["Unauthorised Substance", "Chemical Hazard"],
+    "fenobucarb": ["Pesticide Residues", "Pesticide Hazard"],
+    "tadalafil": ["Unauthorised Substance", "Chemical Hazard"],
+    "Salmonella Enteritidis, Salmonella infantis, Salmonella paratyphi b": ["Pathogenic Micro-organisms", "Biological Hazard"],
+    "Dead insects": ["Foreign Bodies", "Physical Hazard"]
 }
 
 # Initialiser la base de données
@@ -99,10 +69,8 @@ def initialize_database():
                 reference TEXT,
                 notification_from TEXT,
                 country_origin TEXT,
-                product TEXT,
                 product_category TEXT,
                 hazard_substance TEXT,
-                hazard_category TEXT,
                 prodcat TEXT,
                 groupprod TEXT,
                 hazcat TEXT,
@@ -142,9 +110,21 @@ def download_and_clean_weekly_data(year, week):
     response = requests.get(url)
     if response.status_code == 200:
         try:
+            # Télécharger le fichier Excel
             df = pd.read_excel(BytesIO(response.content))
+            
+            # Vérifier si les colonnes attendues existent
+            missing_columns = [col for col in WEEKLY_COLUMN_MAPPING.keys() if col not in df.columns]
+            if missing_columns:
+                st.warning(f"Missing columns in week {week} (Year {year}): {missing_columns}")
+                return pd.DataFrame()
+            
+            # Renommer les colonnes
             df = df.rename(columns=WEEKLY_COLUMN_MAPPING)
+            
+            # Appliquer les mappings pour les catégories de produits et de dangers
             df = apply_mappings(df)
+            
             st.success(f"Data for week {week} (Year {year}) loaded successfully.")
             return df
         except Exception as e:
@@ -158,12 +138,16 @@ def apply_mappings(df):
     """
     Applique les mappings pour les catégories de produits et de dangers.
     """
+    # Mapping des catégories de produits
     df[['prodcat', 'groupprod']] = df['product_category'].apply(
         lambda x: pd.Series(PRODUCT_CATEGORY_MAPPING.get(str(x).lower(), ["Unknown", "Unknown"]))
     )
-    df[['hazcat', 'grouphaz']] = df['hazard_category'].apply(
+    
+    # Mapping des catégories de dangers
+    df[['hazcat', 'grouphaz']] = df['hazard_substance'].apply(
         lambda x: pd.Series(HAZARD_CATEGORY_MAPPING.get(str(x).lower(), ["Unknown", "Unknown"]))
     )
+    
     return df
 
 # Afficher le tableau de bord
