@@ -1,5 +1,5 @@
 import streamlit as st
-from streamlit_option_menu import option_menu  # Assurez-vous que ce module est installé
+from streamlit_option_menu import option_menu
 import pandas as pd
 import sqlite3
 import requests
@@ -57,7 +57,7 @@ PRODUCT_CATEGORY_MAPPING = {
     "natural mineral waters": ["Natural Mineral Waters", "Beverages"],
     "non-alcoholic beverages": ["Non-Alcoholic Beverages", "Beverages"],
     "nuts, nut products and seeds": ["Nuts and Seeds", "Seeds and Nuts"],
-    "other food product / mixed": ["Mixed Food Products", "Other"],  # Correction ici
+    "other food product / mixed": ["Mixed Food Products", "Other"],
     "pet food": ["Pet Food", "Animal Feed"],
     "plant protection products": ["Plant Protection Products", "Additives"],
     "poultry meat and poultry meat products": ["Poultry Meat", "Meat Products"],
@@ -82,7 +82,7 @@ HAZARD_CATEGORY_MAPPING = {
     "industrial contaminants": ["Industrial Contaminants", "Chemical Hazard"],
     "mycotoxins": ["Mycotoxins", "Biological Hazard"],
     "natural toxins (other)": ["Natural Toxins", "Biological Hazard"],
-    "pathogenic micro-organisms": ["Pathogenic Micro-organisms", "Biological Hazard"),
+    "pathogenic micro-organisms": ["Pathogenic Micro-organisms", "Biological Hazard"],
     "pesticide residues": ["Pesticide Residues", "Pesticide Hazard"],
     "residues of veterinary medicinal": ["Veterinary Medicinal Residues", "Chemical Hazard"]
 }
