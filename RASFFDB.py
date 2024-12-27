@@ -288,20 +288,31 @@ def main():
     elif selected_page == "Add Weekly Data":
         st.header("Add Weekly Data")
         
-        # Slider pour sélectionner l'année
-        year = st.slider("Select Year", 2024, 2025, 2024)
+        # Slider pour sélectionner l'année de début et de fin
+        start_year = st.slider("Start Year", 2024, 2025, 2024)
+        end_year = st.slider("End Year", 2024, 2025, 2025)
         
-        # Slider pour sélectionner la semaine
-        week = st.slider("Select Week", 1, 53, 1)
+        # Slider pour sélectionner la semaine de début et de fin
+        start_week = st.slider("Start Week", 1, 53, 1)
+        end_week = st.slider("End Week", 1, 53, 1)
         
-        # Afficher la semaine sélectionnée au format YY-WW
-        st.write(f"Selected Week: {str(year)[2:]}-{week:02d}")
+        # Afficher la période sélectionnée
+        st.write(f"Selected Period: {start_year}-{start_week:02d} to {end_year}-{end_week:02d}")
         
         if st.button("Download and Add Data"):
-            new_data = download_and_clean_weekly_data(year, week)
-            if not new_data.empty:
-                save_to_database(new_data)
-                st.success(f"Data for week {week} (Year {year}) added successfully.")
+            all_data = pd.DataFrame()
+            for year in range(start_year, end_year + 1):
+                start = start_week if year == start_year else 1
+                end = end_week if year == end_year else 53
+                for week in range(start, end + 1):
+                    new_data = download_and_clean_weekly_data(year, week)
+                    if not new_data.empty:
+                        all_data = pd.concat([all_data, new_data], ignore_index=True)
+            
+            if not all_data.empty:
+                save_to_database(all_data)
+                st.success(f"Data for period {start_year}-{start_week:02d} to {end_year}-{end_week:02d} added successfully.")
+                st.write("Added Data:", all_data)
             else:
                 st.warning("No data was added.")
 
