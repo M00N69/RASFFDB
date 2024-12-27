@@ -12,7 +12,6 @@ import plotly.express as px
 
 # Configuration
 DB_FILE = "rasff_data.db"  # Base de données SQLite persistante
-MAIN_DATA_URL = "https://raw.githubusercontent.com/M00N69/RASFFPORTAL/main/unified_rasff_data_with_grouping.csv"
 
 # Mappings des colonnes entre les fichiers Excel et le format attendu
 WEEKLY_COLUMN_MAPPING = {
@@ -134,27 +133,25 @@ def save_to_database(data):
             data.to_sql("rasff_data", connection, if_exists="append", index=False)
 
 # Télécharger et traiter les données hebdomadaires
-def download_and_clean_weekly_data(year, weeks):
+def download_and_clean_weekly_data(year, week):
     """
-    Télécharge et traite les données RASFF pour une année et des semaines spécifiques.
+    Télécharge et traite les données RASFF pour une année et une semaine spécifiques.
     """
     url_template = "https://www.sirene-diffusion.fr/regia/000-rasff/{}/rasff-{}-{}.xls"
-    dfs = []
-    for week in weeks:
-        url = url_template.format(str(year)[2:], year, str(week).zfill(2))
-        response = requests.get(url)
-        if response.status_code == 200:
-            try:
-                df = pd.read_excel(BytesIO(response.content))
-                df = df.rename(columns=WEEKLY_COLUMN_MAPPING)
-                df = apply_mappings(df)
-                dfs.append(df)
-                st.info(f"Data for week {week} loaded successfully.")
-            except Exception as e:
-                st.warning(f"Failed to process data for week {week}: {e}")
-        else:
-            st.warning(f"Data for week {week} could not be downloaded.")
-    return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
+    url = url_template.format(str(year)[2:], year, str(week).zfill(2))
+    response = requests.get(url)
+    if response.status_code == 200:
+        try:
+            df = pd.read_excel(BytesIO(response.content))
+            df = df.rename(columns=WEEKLY_COLUMN_MAPPING)
+            df = apply_mappings(df)
+            st.success(f"Data for week {week} (Year {year}) loaded successfully.")
+            return df
+        except Exception as e:
+            st.warning(f"Failed to process data for week {week} (Year {year}): {e}")
+    else:
+        st.warning(f"Data for week {week} (Year {year}) could not be downloaded.")
+    return pd.DataFrame()
 
 # Appliquer les mappings
 def apply_mappings(df):
@@ -273,8 +270,8 @@ def main():
     # Navigation
     selected_page = option_menu(
         "RASFF Dashboard",
-        ["Dashboard", "Statistical Analysis"],
-        icons=["house", "bar-chart"],
+        ["Dashboard", "Statistical Analysis", "Add Weekly Data"],
+        icons=["house", "bar-chart", "plus"],
         menu_icon="menu",
         default_index=0,
         orientation="horizontal"
@@ -288,6 +285,25 @@ def main():
         display_dashboard(df)
     elif selected_page == "Statistical Analysis":
         show_statistical_analysis(df)
+    elif selected_page == "Add Weekly Data":
+        st.header("Add Weekly Data")
+        
+        # Slider pour sélectionner l'année
+        year = st.slider("Select Year", 2024, 2025, 2024)
+        
+        # Slider pour sélectionner la semaine
+        week = st.slider("Select Week", 1, 53, 1)
+        
+        # Afficher la semaine sélectionnée au format YY-WW
+        st.write(f"Selected Week: {str(year)[2:]}-{week:02d}")
+        
+        if st.button("Download and Add Data"):
+            new_data = download_and_clean_weekly_data(year, week)
+            if not new_data.empty:
+                save_to_database(new_data)
+                st.success(f"Data for week {week} (Year {year}) added successfully.")
+            else:
+                st.warning("No data was added.")
 
 if __name__ == "__main__":
     main()
