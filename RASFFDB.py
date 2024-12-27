@@ -57,7 +57,7 @@ PRODUCT_CATEGORY_MAPPING = {
     "natural mineral waters": ["Natural Mineral Waters", "Beverages"],
     "non-alcoholic beverages": ["Non-Alcoholic Beverages", "Beverages"],
     "nuts, nut products and seeds": ["Nuts and Seeds", "Seeds and Nuts"],
-    "other food product / mixed": ["Mixed Food Products", "Other"),
+    "other food product / mixed": ["Mixed Food Products", "Other"],  # Correction ici
     "pet food": ["Pet Food", "Animal Feed"],
     "plant protection products": ["Plant Protection Products", "Additives"],
     "poultry meat and poultry meat products": ["Poultry Meat", "Meat Products"],
