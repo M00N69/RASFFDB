@@ -333,6 +333,10 @@ class RASFFDashboard:
         else:
             st.error("The database update failed. Please check the data and try again.")
 
+        # Affiche les nouvelles données ajoutées
+        st.write("New data added to the database:")
+        st.dataframe(new_data)
+
     def run(self):
         st.title("RASFF Data Dashboard")
 
