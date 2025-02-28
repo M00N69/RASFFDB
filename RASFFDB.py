@@ -11,9 +11,13 @@ import matplotlib.pyplot as plt
 import threading
 import sqlite3
 import os
+import sys
+
+# Ajouter le répertoire parent au PYTHONPATH
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # Importer la page update.py
-from RASFFDB.page.update import update_page
+from page.update import update_page
 
 # Configuration du thème Streamlit
 st.set_page_config(page_title="RASFF Data Dashboard", layout="wide")
