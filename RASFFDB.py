@@ -312,6 +312,9 @@ class RASFFDashboard:
             new_data.to_sql('rasff_data', conn, if_exists='append', index=False)
             conn.close()
             st.info(f"Data for weeks {start_week} to {current_week} has been updated in the database.")
+            # Recharge les données après la mise à jour
+            self.data = load_data_from_db()
+            self.data = apply_mappings(self.data)
 
     def run(self):
         st.title("RASFF Data Dashboard")
@@ -501,3 +504,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
