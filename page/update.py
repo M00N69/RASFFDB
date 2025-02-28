@@ -22,6 +22,9 @@ COLUMN_MAPPING = {
 }
 
 # === FONCTIONS ===
+def update_page():
+    st.title("Mise à jour des données RASFF")
+    st.write("Ici, vous pouvez mettre à jour les alertes RASFF en téléchargeant de nouvelles données.")
 
 def download_xls(year, week):
     """Télécharge un fichier XLS à partir de l'URL"""
