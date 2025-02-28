@@ -104,6 +104,9 @@ def download_and_clean_weekly_data(year, weeks):
                     if col not in df.columns:
                         df[col] = None  # Add missing column with default None values
 
+                # Convert 'date_of_case' to a standardized date format
+                df['date_of_case'] = pd.to_datetime(df['date_of_case'], errors='coerce', format='%d-%m-%Y %H:%M:%S')
+
                 # Select and reorder columns to match the main DataFrame
                 df = df[expected_columns]
 
@@ -315,6 +318,20 @@ class RASFFDashboard:
             # Recharge les données après la mise à jour
             self.data = load_data_from_db()
             self.data = apply_mappings(self.data)
+            # Vérification des données mises à jour
+            self.verify_data_update(new_data)
+
+    def verify_data_update(self, new_data: pd.DataFrame):
+        # Vérifie que les nouvelles données sont présentes dans la base de données
+        conn = sqlite3.connect(DB_FILE)
+        updated_df = pd.read_sql_query("SELECT * FROM rasff_data", conn)
+        conn.close()
+
+        # Vérifie que les nouvelles données sont bien présentes dans la base de données
+        if updated_df.shape[0] >= (self.data.shape[0] + new_data.shape[0]):
+            st.success("The database has been successfully updated with the new data.")
+        else:
+            st.error("The database update failed. Please check the data and try again.")
 
     def run(self):
         st.title("RASFF Data Dashboard")
@@ -504,4 +521,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
