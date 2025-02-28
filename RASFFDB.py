@@ -17,7 +17,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # Importer la page update.py
-from page.update import update_page
+from pages.update import update_page  # 🔥 Assure-toi que le fichier existe
 
 # Configuration du thème Streamlit
 st.set_page_config(page_title="RASFF Data Dashboard", layout="wide")
@@ -46,7 +46,7 @@ def init_db():
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS rasff_data (
             date_of_case TEXT,
-            reference TEXT,
+            reference TEXT PRIMARY KEY,  -- 🔥 Ajout de la contrainte UNIQUE
             notification_from TEXT,
             country_origin TEXT,
             product TEXT,
