@@ -2,7 +2,6 @@ streamlit
 pandas
 openpyxl
 requests
-sqlite3
 PyGithub
 plotly
 seaborn
