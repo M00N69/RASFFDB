@@ -12,6 +12,9 @@ import threading
 import sqlite3
 import os
 
+# Importer la page update.py
+from RASFFDB.page.update import update_page
+
 # Configuration du thème Streamlit
 st.set_page_config(page_title="RASFF Data Dashboard", layout="wide")
 st.markdown(
@@ -509,8 +512,8 @@ def main():
     # Barre de navigation
     selected_page = option_menu(
         "RASFF Dashboard",
-        ["Dashboard", "Statistical Analysis"],
-        icons=["house", "bar-chart"],
+        ["Dashboard", "Statistical Analysis", "Update Data"],
+        icons=["house", "bar-chart", "arrow-repeat"],
         menu_icon="menu",
         default_index=0,
         orientation="horizontal"
@@ -522,6 +525,8 @@ def main():
         dashboard.run()
     elif selected_page == "Statistical Analysis":
         show_statistical_analysis(dashboard.data)
+    elif selected_page == "Update Data":
+        update_page()
 
 if __name__ == "__main__":
     main()
