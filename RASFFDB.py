@@ -3,9 +3,7 @@ import pandas as pd
 import sqlite3
 import requests
 import datetime
-from github import Github
 from io import BytesIO
-import os
 
 # Configuration Streamlit
 st.set_page_config(
@@ -16,30 +14,43 @@ st.set_page_config(
 
 # Constantes
 DB_PATH = "rasff_data.db"
-GITHUB_REPO = "M00N69/RASFFDB"
-DB_GITHUB_URL = "https://raw.githubusercontent.com/M00N69/RASFFDB/main/rasff_data.db"
+GITHUB_URL = "https://raw.githubusercontent.com/M00N69/RASFFDB/main/rasff_data.db"
 
-# Structure de la base de données
-COLUMNS = [
-    "reference", "category", "type", "subject", "date",
-    "notifying_country", "classification", "risk_decision",
-    "distribution", "forAttention", "forFollowUp",
-    "operator", "origin", "hazards", "year", "month", "week"
-]
+# Structure de la base
+TABLE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS alerts (
+    reference TEXT PRIMARY KEY,
+    category TEXT,
+    type TEXT,
+    subject TEXT,
+    date TEXT,
+    notifying_country TEXT,
+    classification TEXT,
+    risk_decision TEXT,
+    distribution TEXT,
+    forAttention TEXT,
+    forFollowUp TEXT,
+    operator TEXT,
+    origin TEXT,
+    hazards TEXT,
+    year INTEGER,
+    month INTEGER,
+    week INTEGER
+);
+"""
 
-# Initialisation de la base
-def init_database():
+# --- FONCTIONS ---
+def init_db():
+    """Initialise la base de données"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute(f"""
-        CREATE TABLE IF NOT EXISTS alerts ({', '.join([f"{col} TEXT" for col in COLUMNS])})
-    """)
+    cursor.execute(TABLE_SCHEMA)
     conn.commit()
     conn.close()
 
-# Récupération automatique de la base GitHub
-def download_github_db():
-    response = requests.get(DB_GITHUB_URL)
+def download_from_github():
+    """Télécharge la base depuis GitHub"""
+    response = requests.get(GITHUB_URL)
     if response.status_code == 200:
         with open(DB_PATH, "wb") as f:
             f.write(response.content)
@@ -47,26 +58,46 @@ def download_github_db():
     else:
         st.error("Échec du téléchargement")
 
-# Mise à jour automatique des semaines
-def update_database():
+def get_last_date():
+    """Récupère la dernière date enregistrée"""
     conn = sqlite3.connect(DB_PATH)
-    current_date = datetime.datetime.now()
+    df = pd.read_sql("SELECT MAX(date) AS last_date FROM alerts", conn)
+    conn.close()
+    return df.iloc[0]["last_date"]
+
+def get_missing_weeks():
+    """Calcule les semaines manquantes"""
+    last_date = get_last_date()
+    if not last_date:
+        start_year = 2020
+        start_week = 1
+    else:
+        last_dt = datetime.datetime.strptime(last_date, "%d-%m-%Y %H:%M:%S")
+        start_year = last_dt.year
+        start_week = last_dt.isocalendar().week + 1
     
-    # Dernière date dans la base
-    last_date = pd.read_sql("SELECT MAX(date) AS last_date FROM alerts", conn)["last_date"][0]
-    start_year = int(last_date[:4]) if last_date else 2020
+    current_dt = datetime.datetime.now()
+    current_year = current_dt.year
+    current_week = current_dt.isocalendar().week
     
-    # Génération des semaines manquantes
-    missing_weeks = []
-    for year in range(start_year, current_date.year + 1):
-        week_start = 1 if year == current_date.year else 1
-        week_end = current_date.isocalender().week if year == current_date.year else 52
+    missing = []
+    for year in range(start_year, current_year + 1):
+        week_start = start_week if year == start_year else 1
+        week_end = current_week if year == current_year else 52
         for week in range(week_start, week_end + 1):
-            if not pd.read_sql(f"SELECT * FROM alerts WHERE week={week} AND year={year}", conn).empty:
-                continue
-            missing_weeks.append((year, week))
+            missing.append((year, week))
+    return missing
+
+def update_database():
+    """Mets à jour la base avec les semaines manquantes"""
+    missing_weeks = get_missing_weeks()
+    if not missing_weeks:
+        st.info("Aucune semaine manquante trouvée")
+        return
     
-    # Téléchargement des semaines manquantes
+    conn = sqlite3.connect(DB_PATH)
+    existing_refs = pd.read_sql("SELECT reference FROM alerts", conn)["reference"].tolist()
+    
     for year, week in missing_weeks:
         url = f"https://www.sirene-diffusion.fr/regia/000-rasff/{str(year)[2:]}/rasff-{year}-{str(week).zfill(2)}.xls"
         try:
@@ -75,79 +106,57 @@ def update_database():
             df = pd.concat([pd.read_excel(xls, sheet_name=s) for s in xls.sheet_names], ignore_index=True)
             
             # Nettoyage des données
-            df = df[COLUMNS].applymap(lambda x: x.strip() if isinstance(x, str) else x)
             df["date"] = pd.to_datetime(df["date"], errors="coerce")
             df["year"] = df["date"].dt.year
             df["month"] = df["date"].dt.month
             df["week"] = df["date"].dt.isocalendar().week
             
-            # Insertion sans doublons
-            existing_refs = pd.read_sql("SELECT reference FROM alerts", conn)["reference"].tolist()
+            # Suppression des doublons
             new_data = df[~df["reference"].isin(existing_refs)].dropna(subset=["reference"])
-            new_data.to_sql("alerts", conn, if_exists="append", index=False)
-            st.write(f"Semaine {year}-W{week}: {len(new_data)} alertes ajoutées")
-            
+            if not new_data.empty:
+                new_data.to_sql("alerts", conn, if_exists="append", index=False)
+                st.write(f"Semaine {year}-W{week}: {len(new_data)} alertes ajoutées")
+        
         except Exception as e:
             st.error(f"Erreur pour {year}-W{week}: {str(e)[:50]}")
     
     conn.close()
 
-# Synchronisation GitHub
-def push_to_github():
-    try:
-        g = Github(os.getenv("GITHUB_TOKEN"))
-        repo = g.get_repo(GITHUB_REPO)
-        with open(DB_PATH, 'rb') as f:
-            repo.update_file(
-                DB_PATH,
-                "Mise à jour automatique",
-                f.read(),
-                repo.get_contents(DB_PATH).sha
-            )
-        st.success("Base mise à jour sur GitHub")
-    except Exception as e:
-        st.error(f"Erreur GitHub: {e}")
-
-# Interface Streamlit
+# --- INTERFACE ---
 def main():
     # Initialisation
     if not os.path.exists(DB_PATH):
-        download_github_db()
-    init_database()
+        download_from_github()
+    init_db()
     
     # Mise à jour automatique au démarrage
-    st.sidebar.button("🔄 Mettre à jour la base", on_click=update_database)
+    st.spinner("Mise à jour automatique en cours...")
+    update_database()
     
     # Récupération des données
     conn = sqlite3.connect(DB_PATH)
     df = pd.read_sql("SELECT * FROM alerts", conn)
     
-    # Filtrage interactif
-    st.sidebar.title("FilterWhere")
-    category = st.sidebar.selectbox("Catégorie", ["Toutes"] + df["category"].unique().tolist())
-    country = st.sidebar.selectbox("Pays", ["Tous"] + df["notifying_country"].unique().tolist())
-    year = st.sidebar.selectbox("Année", ["Toutes"] + sorted(df["year"].unique().tolist(), reverse=True))
+    # Filtrage
+    st.title("🚨 RASFF Alerts")
+    selected_year = st.sidebar.selectbox("Année", sorted(df['year'].unique(), reverse=True))
+    selected_country = st.sidebar.selectbox("Pays", ["Tous"] + sorted(df['notifying_country'].unique()))
     
     # Application des filtres
     filtered_df = df.copy()
-    if category != "Toutes":
-        filtered_df = filtered_df[filtered_df["category"] == category]
-    if country != "Tous":
-        filtered_df = filtered_df[filtered_df["notifying_country"] == country]
-    if year != "Toutes":
-        filtered_df = filtered_df[filtered_df["year"] == year]
+    if selected_year != "Tous":
+        filtered_df = filtered_df[filtered_df['year'] == selected_year]
+    if selected_country != "Tous":
+        filtered_df = filtered_df[filtered_df['notifying_country'] == selected_country]
     
     # Affichage
-    st.title("🚨 RASFF Alerts")
-    st.dataframe(filtered_df[COLUMNS[:-3]], height=600)
+    st.write(f"## 📊 {len(filtered_df)} alertes trouvées")
+    st.dataframe(filtered_df, height=600)
     
     # Graphiques
-    st.subheader("Répartition par pays")
-    st.bar_chart(filtered_df["notifying_country"].value_counts().head(10))
-    
-    # Synchronisation GitHub
-    if st.sidebar.button("🔄 Push vers GitHub"):
-        push_to_github()
+    st.write("## 🌟 Répartition par pays")
+    st.bar_chart(filtered_df['notifying_country'].value_counts().head(10))
 
 if __name__ == "__main__":
     main()
+    
