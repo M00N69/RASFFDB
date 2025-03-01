@@ -1,137 +1,154 @@
-# RASFF Data Manager
+🛠 Explication Complète du Code :
+🟢 Partie 1 : Fonctionnalités Utilisateur (Interface Streamlit)
+Objectif: Fournir un tableau de bord interactif pour consulter les alertes RASFF.
 
-RASFF Data Manager est une application interactive développée en Python et Streamlit, qui permet de gérer les données hebdomadaires du système d'alerte rapide pour les denrées alimentaires et les aliments pour animaux (RASFF). Cette application inclut des fonctionnalités avancées pour télécharger, nettoyer, et sauvegarder les données dans une base SQLite, ainsi que pour mettre à jour ces données directement sur GitHub.
+🌟 1. Mise en Page et Configuration:
+python
+Copier
+Modifier
+import streamlit as st
+st.set_page_config(layout="wide")  # ✅ Mode large activé
+Fonction: Définit la page en mode large (wide) pour un affichage optimisé des tableaux et graphiques.
+🌟 2. Titre et Interface:
+python
+Copier
+Modifier
+st.title("🚨 RASFF Alerts Dashboard")
+Fonction: Affiche le titre principal du tableau de bord.
+🌟 3. Filtrage Dynamique:
+python
+Copier
+Modifier
+selected_country = st.sidebar.selectbox("Pays", ["Tous"] + sorted(df["notifying_country"].unique()))
+selected_year = st.sidebar.selectbox("Année", ["Tous"] + sorted(df["year"].unique(), reverse=True))
+selected_category = st.sidebar.selectbox("Catégorie", ["Toutes"] + sorted(df["category"].unique()))
+Fonction: Ajoute des menus déroulants dans la barre latérale pour :
+Filtrer par pays notifiant.
+Filtrer par année.
+Filtrer par catégorie de produit.
+🌟 4. Application des Filtres et Affichage des Données:
+python
+Copier
+Modifier
+filtered_df = df.copy()
+if selected_country != "Tous":
+    filtered_df = filtered_df[filtered_df["notifying_country"] == selected_country]
+if selected_year != "Tous":
+    filtered_df = filtered_df[filtered_df["year"] == selected_year]
+if selected_category != "Toutes":
+    filtered_df = filtered_df[filtered_df["category"] == selected_category]
 
----
+st.write(f"## 📊 {len(filtered_df)} alertes ({selected_year})")
+st.dataframe(filtered_df, height=600)
+Fonction:
+Applique les filtres sélectionnés par l'utilisateur.
+Affiche les résultats filtrés dans un tableau dynamique.
+🌟 5. Visualisation avec des Graphiques:
+python
+Copier
+Modifier
+st.write("## 🌟 Répartition par pays")
+st.bar_chart(filtered_df["notifying_country"].value_counts().head(10))
+Fonction: Génère un graphique en barres des alertes par pays (Top 10).
+🔵 Partie 2 : Construction et Gestion des Données
+Objectif: Gérer automatiquement le téléchargement, la mise à jour et l'intégration des données dans la base de données SQLite.
 
-## **Fonctionnalités**
+🔄 1. Téléchargement de la Base de Données depuis GitHub:
+python
+Copier
+Modifier
+def download_from_github():
+    url = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/main/{FILE_PATH}"
+    response = requests.get(url)
+    with open(DB_PATH, "wb") as file:
+        file.write(response.content)
+Fonction: Télécharge la base (rasff_data.db) si elle n'existe pas localement.
+🛠 2. Ajout des Colonnes Manquantes (year et week):
+python
+Copier
+Modifier
+def add_missing_columns():
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("ALTER TABLE rasff_notifications ADD COLUMN year INTEGER")
+        cursor.execute("ALTER TABLE rasff_notifications ADD COLUMN week INTEGER")
+        cursor.execute("UPDATE rasff_notifications SET year = strftime('%Y', date)")
+        cursor.execute("UPDATE rasff_notifications SET week = strftime('%W', date)")
+        conn.commit()
+Fonction:
+Ajoute les colonnes year et week si elles n'existent pas.
+Remplit ces colonnes à partir de la colonne date.
+🔄 3. Téléchargement Automatique des Nouvelles Semaines:
+python
+Copier
+Modifier
+def update_database():
+    last_year, last_week = get_last_update_info()
+    current_year = pd.Timestamp.now().year
+    current_week = pd.Timestamp.now().week
 
-1. **Téléchargement Automatique :**
-   - Télécharge les données hebdomadaires manquantes jusqu'à la semaine courante.
-   - Vérifie automatiquement la dernière semaine présente dans la base de données.
+    for year in range(last_year, current_year + 1):
+        start_week = last_week + 1 if year == last_year else 1
+        end_week = current_week if year == current_year else 52
 
-2. **Nettoyage des Données :**
-   - Effectue un mappage des colonnes pour harmoniser les données.
-   - Ajoute des catégories dérivées pour les produits et les dangers (prodcat, groupprod, hazcat, grouphaz).
+        for week in range(start_week, end_week + 1):
+            week_str = str(week).zfill(2)
+            url = f"https://www.sirene-diffusion.fr/regia/000-rasff/{str(year)[-2:]}/rasff-{year}-{week_str}.xls"
+            response = requests.get(url)
 
-3. **Sauvegarde dans SQLite :**
-   - Stocke les données dans une base de données SQLite persistante (`rasff_data.db`).
+            if response.status_code == 200:
+                df = pd.read_excel(BytesIO(response.content))
+                df['date'] = pd.to_datetime(df['date'], format='%d-%m-%Y %H:%M:%S')
+                df['year'] = df['date'].dt.year
+                df['week'] = df['date'].dt.isocalendar().week
 
-4. **Mise à Jour GitHub :**
-   - Pousse automatiquement la base de données mise à jour vers un dépôt GitHub via l'API.
+                with sqlite3.connect(DB_PATH) as conn:
+                    df.to_sql("rasff_notifications", conn, if_exists="append", index=False)
+                print(f"✅ Données ajoutées pour l'année {year}, semaine {week_str}")
+            else:
+                print(f"❌ Fichier non trouvé pour l'année {year}, semaine {week_str}")
+                break
+Fonction:
+Vérifie la dernière semaine enregistrée.
+Télécharge les fichiers .xls manquants.
+Insère les nouvelles données dans rasff_notifications.
+🔄 4. Synchronisation Automatique avec GitHub:
+python
+Copier
+Modifier
+def update_github():
+    with open(DB_PATH, "rb") as file:
+        content = file.read()
+    encoded_content = base64.b64encode(content).decode()
 
-5. **Interface Intuitive :**
-   - Affichage des données via un tableau interactif.
-   - Menu clair pour charger les données manquantes et synchroniser avec GitHub.
+    response = requests.get(GITHUB_API_URL, headers={
+        "Authorization": f"Bearer {GITHUB_TOKEN}"
+    })
+    response_data = response.json()
+    sha = response_data.get("sha", None)
 
----
+    data = {
+        "message": "Mise à jour automatique de la base RASFF",
+        "content": encoded_content,
+        "sha": sha
+    }
 
-## **Installation**
+    response = requests.put(GITHUB_API_URL, json=data, headers={
+        "Authorization": f"Bearer {GITHUB_TOKEN}"
+    })
+Fonction:
+Encode le fichier .db en base64.
+Utilise l'API GitHub pour pousser les modifications.
+🟢 Conclusion : Comment Tout Fonctionne Ensemble
+Au démarrage :
 
-### Prérequis
-- Python 3.8 ou une version plus récente.
-- Un compte GitHub avec un dépôt dédié pour stocker la base de données (`rasff_data.db`).
-- Un token GitHub personnel avec les permissions nécessaires (voir ci-dessous).
+Télécharge la base si absente.
+Ajoute les colonnes year et week si manquantes.
+Télécharge et insère les nouvelles semaines automatiquement.
+Synchronise les changements sur GitHub.
+Interface Utilisateur:
 
-### Instructions
+Tableau de bord avec filtres (pays, année, catégorie).
+Affichage dynamique des données.
+Graphiques interactifs.
 
-1. Clonez ce dépôt :
-   ```bash
-   git clone https://github.com/M00N69/RASFFDB.git
-   cd RASFFDB
-Installez les dépendances nécessaires :
-
-bash
-Copier le code
-pip install -r requirements.txt
-Configurez votre token GitHub :
-
-Générer un token GitHub avec les permissions repo ou public_repo pour un dépôt public.
-Ajoutez ce token comme une variable d'environnement nommée GITHUB_TOKEN.
-Exemple sous Linux/MacOS :
-
-bash
-Copier le code
-export GITHUB_TOKEN=your_personal_access_token
-Sous Windows :
-
-cmd
-Copier le code
-set GITHUB_TOKEN=your_personal_access_token
-Lancez l'application Streamlit :
-
-bash
-Copier le code
-streamlit run RASFFDB.py
-Ouvrez l'application dans votre navigateur :
-
-Streamlit affichera un lien comme http://localhost:8501. Cliquez pour accéder à l'interface.
-Utilisation
-Menu Principal
-Afficher les Données :
-
-Affiche les données actuelles stockées dans la base SQLite.
-Charger les Semaines Manquantes :
-
-Télécharge automatiquement les semaines non présentes dans la base jusqu'à la semaine courante.
-Nettoie et insère les données dans la base SQLite.
-Pousser le Fichier vers GitHub :
-
-Pousse la base rasff_data.db mise à jour dans le dépôt GitHub configuré.
-Structure du Projet
-bash
-Copier le code
-RASFFDB/
-│
-├── RASFFDB.py         # Code principal de l'application
-├── requirements.txt   # Dépendances Python
-├── rasff_data.db      # Base de données SQLite (créée automatiquement)
-└── README.md          # Documentation du projet
-Dépendances
-Les bibliothèques utilisées dans ce projet incluent :
-
-streamlit : Pour l'interface utilisateur.
-pandas : Pour le traitement des données tabulaires.
-sqlite3 : Pour stocker les données localement.
-requests : Pour télécharger les fichiers Excel depuis des URLs.
-openpyxl : Pour lire et traiter les fichiers Excel.
-PyGithub : Pour interagir avec l'API GitHub.
-Pour installer toutes les dépendances :
-
-bash
-Copier le code
-pip install -r requirements.txt
-Mappages Utilisés
-Catégories de Produits
-Les produits sont classés selon les catégories suivantes :
-
-Exemples :
-"alcoholic beverages" → ["Alcoholic Beverages", "Beverages"]
-"fruits and vegetables" → ["Fruits and Vegetables", "Fruits and Vegetables"]
-Voir le fichier RASFFDB.py pour les détails complets.
-Catégories de Dangers
-Les dangers sont classés selon les catégories suivantes :
-
-Exemples :
-"adulteration / fraud" → ["Adulteration / Fraud", "Food Fraud"]
-"pathogenic micro-organisms" → ["Pathogenic Micro-organisms", "Biological Hazard"]
-Voir le fichier RASFFDB.py pour les détails complets.
-Contributions
-Les contributions sont les bienvenues ! Voici comment vous pouvez contribuer :
-
-Forkez ce dépôt.
-Créez une branche pour vos modifications :
-bash
-Copier le code
-git checkout -b feature-xyz
-Testez vos modifications.
-Soumettez une Pull Request.
-Auteurs
-[Votre Nom ou Pseudo GitHub]
-Développeur principal de l'application.
-Licence
-Ce projet est sous licence MIT. Consultez le fichier LICENSE pour plus de détails.
-
-Remarques Importantes
-Si vous utilisez cette application sur Streamlit Cloud, assurez-vous de configurer les secrets nécessaires (GITHUB_TOKEN) dans la section Secrets de l'application.
-La base SQLite (rasff_data.db) sera recréée automatiquement si elle est manquante.
