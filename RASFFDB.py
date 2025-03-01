@@ -1,16 +1,22 @@
+import streamlit as st
 import pandas as pd
 import sqlite3
 import requests
 import datetime
-from github import Github
 from io import BytesIO
 import os
+
+# Configuration Streamlit
+st.set_page_config(
+    page_title="🚨 RASFF Alerts",
+    page_icon="🚨",
+    layout="wide",
+)
 
 # Constantes
 DB_PATH = "rasff_data.db"
 GITHUB_REPO = "M00N69/RASFFDB"
 DB_GITHUB_URL = "https://raw.githubusercontent.com/M00N69/RASFFDB/main/rasff_data.db"
-GITHUB_TOKEN = "votre_token_github"  # Remplacez par votre token ou utilisez os.getenv("GITHUB_TOKEN")
 
 # Structure de la base de données
 TABLE_SCHEMA = """
@@ -40,7 +46,7 @@ def init_database():
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(TABLE_SCHEMA)
         conn.commit()
-    print("Base de données initialisée")
+    st.success("Base de données initialisée")
 
 def download_database():
     """Télécharge la base de données depuis GitHub"""
@@ -49,13 +55,13 @@ def download_database():
         if response.status_code == 200:
             with open(DB_PATH, "wb") as f:
                 f.write(response.content)
-            print("Base de données téléchargée depuis GitHub")
+            st.success("Base de données téléchargée depuis GitHub")
             return True
         else:
-            print(f"Erreur lors du téléchargement: {response.status_code}")
+            st.error(f"Erreur lors du téléchargement: {response.status_code}")
             return False
     except Exception as e:
-        print(f"Exception lors du téléchargement: {e}")
+        st.error(f"Exception lors du téléchargement: {e}")
         return False
 
 def get_missing_weeks():
@@ -70,7 +76,7 @@ def get_missing_weeks():
             last_dt = datetime.datetime.strptime(last_date, "%d-%m-%Y %H:%M:%S")
         except ValueError:
             # Si le format de date est différent, utiliser une date par défaut
-            print(f"Format de date incorrect: {last_date}")
+            st.warning(f"Format de date incorrect: {last_date}")
             last_dt = datetime.datetime(2020, 1, 1)
     else:
         last_dt = datetime.datetime(2020, 1, 1)
@@ -86,20 +92,26 @@ def get_missing_weeks():
         for week in range(start_week, end_week + 1):
             missing_weeks.append((year, week))
     
-    print(f"Semaines manquantes: {len(missing_weeks)}")
     return missing_weeks
 
-def update_database():
+def update_database(progress_bar=None):
     """Met à jour la base de données avec les nouvelles données"""
     with sqlite3.connect(DB_PATH) as conn:
         existing_refs = pd.read_sql("SELECT reference FROM rasff", conn)["reference"].tolist()
         missing_weeks = get_missing_weeks()
         
+        if progress_bar is None:
+            progress_bar = st.progress(0)
+        
+        log = st.empty()
         total_added = 0
-        for year, week in missing_weeks:
+        total_weeks = len(missing_weeks)
+        
+        for i, (year, week) in enumerate(missing_weeks):
+            progress_bar.progress(i / total_weeks)
             url = f"https://www.sirene-diffusion.fr/regia/000-rasff/{str(year)[2:]}/rasff-{year}-{str(week).zfill(2)}.xls"
             try:
-                print(f"Récupération {year}-W{week}: {url}")
+                log.text(f"Récupération {year}-W{week}...")
                 response = requests.get(url, timeout=15)
                 if response.status_code == 200:
                     xls = pd.ExcelFile(BytesIO(response.content))
@@ -109,10 +121,10 @@ def update_database():
                             sheet_df = pd.read_excel(xls, sheet_name=sheet)
                             sheets_data.append(sheet_df)
                         except Exception as e:
-                            print(f"Erreur lecture feuille {sheet}: {e}")
+                            log.text(f"Erreur lecture feuille {sheet}: {e}")
                     
                     if not sheets_data:
-                        print(f"Aucune donnée pour {year}-W{week}")
+                        log.text(f"Aucune donnée pour {year}-W{week}")
                         continue
                         
                     df = pd.concat(sheets_data, ignore_index=True)
@@ -120,7 +132,7 @@ def update_database():
                     # Vérifier que les colonnes nécessaires existent
                     required_cols = ["reference", "date"]
                     if not all(col in df.columns for col in required_cols):
-                        print(f"Colonnes manquantes pour {year}-W{week}")
+                        log.text(f"Colonnes manquantes pour {year}-W{week}")
                         continue
                     
                     # Nettoyage des données
@@ -133,7 +145,7 @@ def update_database():
                         df["month"] = df["date"].dt.month
                         df["week"] = df["date"].apply(lambda x: x.isocalendar()[1] if pd.notnull(x) else None)
                     except Exception as e:
-                        print(f"Erreur conversion dates {year}-W{week}: {e}")
+                        log.text(f"Erreur conversion dates {year}-W{week}: {e}")
                         continue
                     
                     # Suppression des doublons
@@ -143,75 +155,130 @@ def update_database():
                             new_data.to_sql("rasff", conn, if_exists="append", index=False)
                             existing_refs.extend(new_data["reference"].tolist())
                             total_added += len(new_data)
-                            print(f"Semaine {year}-W{week}: {len(new_data)} alertes ajoutées")
+                            log.text(f"Semaine {year}-W{week}: {len(new_data)} alertes ajoutées")
                         except Exception as e:
-                            print(f"Erreur insertion {year}-W{week}: {e}")
+                            log.text(f"Erreur insertion {year}-W{week}: {e}")
                     else:
-                        print(f"Aucune nouvelle alerte pour {year}-W{week}")
+                        log.text(f"Aucune nouvelle alerte pour {year}-W{week}")
                 else:
-                    print(f"Fichier non trouvé pour {year}-W{week}: {response.status_code}")
+                    log.text(f"Fichier non trouvé pour {year}-W{week}: {response.status_code}")
             except Exception as e:
-                print(f"Erreur pour {year}-W{week}: {str(e)}")
+                log.text(f"Erreur pour {year}-W{week}: {str(e)}")
         
-        print(f"Total: {total_added} alertes ajoutées")
+        progress_bar.progress(1.0)
         return total_added
 
-def push_to_github():
+def push_to_github(github_token):
     """Pousse les modifications vers GitHub"""
+    if not github_token:
+        st.error("Token GitHub manquant. Veuillez fournir un token valide.")
+        return False
+    
     try:
-        g = Github(GITHUB_TOKEN)
-        repo = g.get_repo(GITHUB_REPO)
+        # Utilisation de requêtes HTTP pour éviter d'avoir à installer PyGithub
+        headers = {
+            "Authorization": f"token {github_token}",
+            "Accept": "application/vnd.github.v3+json"
+        }
         
+        # Vérifier si le fichier existe déjà
+        check_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{DB_PATH}"
+        check_response = requests.get(check_url, headers=headers)
+        
+        # Lire le contenu du fichier local
         with open(DB_PATH, 'rb') as f:
             content = f.read()
         
-        try:
-            contents = repo.get_contents(DB_PATH)
-            repo.update_file(
-                DB_PATH,
-                "Mise à jour automatique",
-                content,
-                contents.sha
-            )
-            print("Base de données mise à jour sur GitHub")
-            return True
-        except Exception as e:
-            print(f"Erreur lors de la mise à jour: {e}")
-            # Si le fichier n'existe pas, le créer
-            try:
-                repo.create_file(
-                    DB_PATH,
-                    "Création initiale",
-                    content
-                )
-                print("Base de données créée sur GitHub")
+        import base64
+        encoded_content = base64.b64encode(content).decode("utf-8")
+        
+        if check_response.status_code == 200:
+            # Le fichier existe, on le met à jour
+            file_info = check_response.json()
+            sha = file_info["sha"]
+            
+            update_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{DB_PATH}"
+            payload = {
+                "message": "Mise à jour automatique",
+                "content": encoded_content,
+                "sha": sha
+            }
+            
+            response = requests.put(update_url, json=payload, headers=headers)
+            
+            if response.status_code in (200, 201):
+                st.success("Base de données mise à jour sur GitHub")
                 return True
-            except Exception as e2:
-                print(f"Erreur lors de la création: {e2}")
+            else:
+                st.error(f"Erreur lors de la mise à jour: {response.status_code} - {response.text}")
+                return False
+        else:
+            # Le fichier n'existe pas, on le crée
+            create_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{DB_PATH}"
+            payload = {
+                "message": "Création initiale",
+                "content": encoded_content
+            }
+            
+            response = requests.put(create_url, json=payload, headers=headers)
+            
+            if response.status_code in (200, 201):
+                st.success("Base de données créée sur GitHub")
+                return True
+            else:
+                st.error(f"Erreur lors de la création: {response.status_code} - {response.text}")
                 return False
     except Exception as e:
-        print(f"Erreur d'authentification GitHub: {e}")
+        st.error(f"Erreur GitHub: {e}")
         return False
 
 def main():
     """Fonction principale"""
+    st.title("🚨 RASFF Alerts - Mise à jour de la base")
+    
     # Télécharger la base si elle n'existe pas
     if not os.path.exists(DB_PATH):
-        success = download_database()
-        if not success:
-            print("Création d'une nouvelle base")
-    
-    # Initialiser la structure
-    init_database()
-    
-    # Mettre à jour avec les données récentes
-    updates = update_database()
-    
-    # Pousser vers GitHub si des mises à jour ont été faites
-    if updates > 0:
-        push_to_github()
+        st.info("Base de données locale non trouvée.")
+        if st.button("📥 Télécharger depuis GitHub"):
+            success = download_database()
+            if not success:
+                st.warning("Création d'une nouvelle base locale")
+                init_database()
     else:
-        print("Aucune mise à jour à synchroniser")
+        init_database()
+    
+    # Afficher les statistiques de la base
+    with sqlite3.connect(DB_PATH) as conn:
+        count = conn.execute("SELECT COUNT(*) FROM rasff").fetchone()[0]
+        last_date = conn.execute("SELECT MAX(date) FROM rasff").fetchone()[0]
+    
+    st.write(f"Base actuelle: **{count}** alertes, dernière date: **{last_date}**")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Mise à jour des données
+        if st.button("🔄 Mettre à jour les données"):
+            progress_bar = st.progress(0)
+            updates = update_database(progress_bar)
+            st.success(f"{updates} alertes ajoutées à la base")
+    
+    with col2:
+        # Synchronisation GitHub
+        github_token = st.text_input("Token GitHub", type="password")
+        if st.button("🚀 Synchroniser avec GitHub"):
+            if github_token:
+                push_to_github(github_token)
+            else:
+                st.error("Veuillez entrer un token GitHub valide")
+    
+    # Aperçu des données
+    if os.path.exists(DB_PATH):
+        st.subheader("Aperçu des dernières alertes")
+        with sqlite3.connect(DB_PATH) as conn:
+            recent_data = pd.read_sql("SELECT * FROM rasff ORDER BY date DESC LIMIT 10", conn)
+            st.dataframe(recent_data)
 
 if __name__ == "__main__":
     main()
+    
