@@ -52,7 +52,7 @@ def update_github():
 # Fonction pour vérifier la dernière semaine et année dans la base
 def get_last_update_info():
     with sqlite3.connect(DB_PATH) as conn:
-        query = "SELECT MAX(year), MAX(week) FROM rasff"
+        query = "SELECT MAX(year), MAX(week) FROM rasff_notifications"
         result = conn.execute(query).fetchone()
     return result
 
@@ -73,8 +73,13 @@ def update_database():
 
             if response.status_code == 200:
                 df = pd.read_excel(BytesIO(response.content))
+                df['date'] = pd.to_datetime(df['date'], format='%d-%m-%Y %H:%M:%S')
+                df['year'] = df['date'].dt.year
+                df['week'] = df['date'].dt.isocalendar().week
+
+                # Insertion dans la base de données
                 with sqlite3.connect(DB_PATH) as conn:
-                    df.to_sql("rasff", conn, if_exists="append", index=False)
+                    df.to_sql("rasff_notifications", conn, if_exists="append", index=False)
                 print(f"✅ Données ajoutées pour l'année {year}, semaine {week_str}")
             else:
                 print(f"❌ Fichier non trouvé pour l'année {year}, semaine {week_str}")
@@ -96,7 +101,7 @@ def main():
 
     # Récupération des données
     with sqlite3.connect(DB_PATH) as conn:
-        df = pd.read_sql("SELECT * FROM rasff", conn)
+        df = pd.read_sql("SELECT * FROM rasff_notifications", conn)
 
     # Filtrage
     selected_country = st.sidebar.selectbox("Pays", ["Tous"] + sorted(df["notifying_country"].unique()))
