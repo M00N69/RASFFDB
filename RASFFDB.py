@@ -109,7 +109,10 @@ def update_database(progress_bar=None):
         
         for i, (year, week) in enumerate(missing_weeks):
             progress_bar.progress(i / total_weeks)
-            url = f"https://www.sirene-diffusion.fr/regia/000-rasff/{str(year)[2:]}/rasff-{year}-{str(week).zfill(2)}.xls"
+            # Utilisation du format correct pour l'URL
+            # Format: https://www.sirene-diffusion.fr/regia/000-rasff/25/rasff-2025-01.xls
+            year_short = str(year)[2:]  # Extraire seulement les 2 derniers chiffres (ex: 25 pour 2025)
+            url = f"https://www.sirene-diffusion.fr/regia/000-rasff/{year_short}/rasff-{year}-{str(week).zfill(2)}.xls"
             try:
                 log.text(f"Récupération {year}-W{week}...")
                 response = requests.get(url, timeout=15)
@@ -281,4 +284,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
