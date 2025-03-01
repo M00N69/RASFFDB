@@ -15,6 +15,24 @@ GITHUB_API_URL = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/content
 
 DB_PATH = "rasff_data.db"
 
+# Fonction pour créer les colonnes manquantes
+def add_missing_columns():
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        # Ajouter les colonnes si elles n'existent pas
+        cursor.execute("ALTER TABLE rasff_notifications ADD COLUMN year INTEGER")
+        cursor.execute("ALTER TABLE rasff_notifications ADD COLUMN week INTEGER")
+        # Mettre à jour les nouvelles colonnes avec les valeurs extraites de 'date'
+        cursor.execute("UPDATE rasff_notifications SET year = strftime('%Y', date)")
+        cursor.execute("UPDATE rasff_notifications SET week = strftime('%W', date)")
+        conn.commit()
+
+# Vérifier et ajouter les colonnes 'year' et 'week' si nécessaire
+try:
+    add_missing_columns()
+except sqlite3.OperationalError:
+    print("✅ Les colonnes 'year' et 'week' existent déjà.")
+
 # Fonction pour télécharger le fichier depuis GitHub
 def download_from_github():
     url = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/main/{FILE_PATH}"
