@@ -91,21 +91,24 @@ def update_database():
             url = f"https://www.sirene-diffusion.fr/regia/000-rasff/{str(year)[2:]}/rasff-{year}-{str(week).zfill(2)}.xls"
             try:
                 response = requests.get(url, timeout=15)
-                xls = pd.ExcelFile(BytesIO(response.content))
-                df = pd.concat([pd.read_excel(xls, sheet_name=s) for s in xls.sheet_names], ignore_index=True)
+                if response.status_code == 200:
+                    xls = pd.ExcelFile(BytesIO(response.content))
+                    df = pd.concat([pd.read_excel(xls, sheet_name=s) for s in xls.sheet_names], ignore_index=True)
 
-                # Nettoyage des données
-                df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
-                df["date"] = pd.to_datetime(df["date"], errors="coerce")
-                df["year"] = df["date"].dt.year
-                df["month"] = df["date"].dt.month
-                df["week"] = df["date"].dt.isocalendar().week
+                    # Nettoyage des données
+                    df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
+                    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+                    df["year"] = df["date"].dt.year
+                    df["month"] = df["date"].dt.month
+                    df["week"] = df["date"].dt.isocalendar().week
 
-                # Suppression des doublons
-                new_data = df[~df["reference"].isin(existing_refs)].dropna(subset=["reference"])
-                if not new_data.empty:
-                    new_data.to_sql("rasff", conn, if_exists="append", index=False)
-                    st.write(f"Semaine {year}-W{week}: {len(new_data)} alertes ajoutées")
+                    # Suppression des doublons
+                    new_data = df[~df["reference"].isin(existing_refs)].dropna(subset=["reference"])
+                    if not new_data.empty:
+                        new_data.to_sql("rasff", conn, if_exists="append", index=False)
+                        st.write(f"Semaine {year}-W{week}: {len(new_data)} alertes ajoutées")
+                else:
+                    st.error(f"Erreur pour {year}-W{week}: Fichier Excel non trouvé")
 
             except Exception as e:
                 st.error(f"Erreur pour {year}-W{week}: {str(e)[:50]}")
