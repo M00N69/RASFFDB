@@ -1,11 +1,6 @@
-streamlit
-pandas
-openpyxl
 requests
-PyGithub
-plotly
-seaborn
-matplotlib
-scipy
-streamlit-option-menu
-streamlit-aggrid
+pandas
+streamlit
+sqlalchemy
+xlrd
+openpyxl
