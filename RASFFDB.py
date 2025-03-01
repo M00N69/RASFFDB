@@ -7,27 +7,28 @@ from github import Github
 from io import BytesIO
 import os
 
-# Configuration
+# Configuration Streamlit
 st.set_page_config(
-    page_title="RASFF Alerts Dashboard",
+    page_title="🚨 RASFF Alerts Dashboard",
     page_icon="🚨",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
+# Constantes
 DB_PATH = "rasff_data.db"
 GITHUB_REPO = "M00N69/RASFFDB"
 DB_GITHUB_URL = "https://raw.githubusercontent.com/M00N69/RASFFDB/main/rasff_data.db"
 
-# GitHub functions...
+# Fonctions GitHub
 def download_github_db():
     response = requests.get(DB_GITHUB_URL)
     if response.status_code == 200:
         with open(DB_PATH, 'wb') as f:
             f.write(response.content)
-        st.success("Database downloaded from GitHub")
+        st.success("Base GitHub téléchargée")
     else:
-        st.error("Failed to download database")
+        st.error("Échec du téléchargement")
 
 def push_to_github():
     try:
@@ -36,15 +37,15 @@ def push_to_github():
         with open(DB_PATH, 'rb') as f:
             repo.update_file(
                 path=DB_PATH,
-                message="Manual update via Streamlit",
+                message="Mise à jour automatique",
                 content=f.read(),
                 sha=repo.get_contents(DB_PATH).sha
             )
-        st.success("Database updated on GitHub")
+        st.success("Base mise à jour sur GitHub")
     except Exception as e:
-        st.error(f"GitHub error: {e}")
+        st.error(f"Erreur GitHub : {e}")
 
-# Database functions...
+# Création/Structure de la base
 def create_database():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -65,6 +66,9 @@ def create_database():
             distribution TEXT,
             attention TEXT,
             follow_up TEXT,
+            operator TEXT,
+            origin TEXT,
+            hazards TEXT,
             year INTEGER,
             month INTEGER,
             week INTEGER
@@ -76,79 +80,192 @@ def create_database():
 def update_database_structure():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    columns = [col[1] for col in cursor.execute("PRAGMA table_info(rasff_data)").fetchall()]
+    existing_columns = [col[1] for col in cursor.execute("PRAGMA table_info(rasff_data)").fetchall()]
     
-    for col in ["year", "month", "week"]:
-        if col not in columns:
-            cursor.execute(f"ALTER TABLE rasff_data ADD COLUMN {col} INTEGER")
+    # Ajouter les colonnes manquantes
+    new_columns = [
+        ("subject", "TEXT"),
+        ("classification", "TEXT"),
+        ("risk_decision", "TEXT"),
+        ("distribution", "TEXT"),
+        ("attention", "TEXT"),
+        ("follow_up", "TEXT"),
+        ("operator", "TEXT"),
+        ("origin", "TEXT"),
+        ("hazards", "TEXT")
+    ]
+    
+    for col_name, col_type in new_columns:
+        if col_name not in existing_columns:
+            cursor.execute(f"ALTER TABLE rasff_data ADD COLUMN {col_name} {col_type}")
     
     conn.commit()
     conn.close()
 
-# Data processing functions...
-def process_excel_upload(file):
-    try:
-        xls = pd.ExcelFile(file)
-        dfs = [pd.read_excel(xls, sheet_name=sn) for sn in xls.sheet_names]
-        df = pd.concat(dfs, ignore_index=True)
-        
-        df['date_of_case'] = pd.to_datetime(df['date'], errors='coerce')
-        df['year'] = df['date_of_case'].dt.year
-        df['month'] = df['date_of_case'].dt.month
-        df['week'] = df['date_of_case'].dt.isocalendar().week
-        
-        return df
-    except Exception as e:
-        st.error(f"Data processing error: {e}")
-        return None
-
-def update_from_uploaded_file(df):
+# Logique de mise à jour
+def get_missing_weeks():
     conn = sqlite3.connect(DB_PATH)
-    existing_refs = pd.read_sql("SELECT reference FROM rasff_data", conn)["reference"].tolist()
-    new_data = df[~df['reference'].isin(existing_refs)].dropna(subset=['reference'])
+    last_date = pd.read_sql("SELECT MAX(date_of_case) AS last_date FROM rasff_data", conn)["last_date"].values[0]
+    current_date = datetime.datetime.now()
+    current_year = current_date.year
+    current_week = current_date.isocalendar().week
     
-    if not new_data.empty:
-        new_data.to_sql('rasff_data', conn, if_exists='append', index=False)
-        st.success(f"{len(new_data)} new alerts added!")
+    missing_weeks = []
+    if last_date:
+        last_year = datetime.datetime.strptime(last_date, "%Y-%m-%d").year
+        last_week = datetime.datetime.strptime(last_date, "%Y-%m-%d").isocalendar().week
     else:
-        st.info("No new data found")
-    conn.close()
+        last_year = current_year - 1
+        last_week = 52
+    
+    for week in range(last_week + 1, 53):
+        missing_weeks.append((last_year, week))
+    for week in range(1, current_week + 1):
+        missing_weeks.append((current_year, week))
+    return missing_weeks
 
-# Main app logic...
+def update_database():
+    missing_weeks = get_missing_weeks()
+    total_added = 0
+    
+    for year, week in missing_weeks:
+        url = f"https://www.sirene-diffusion.fr/regia/000-rasff/{str(year)[2:]}/rasff-{year}-{str(week).zfill(2)}.xls"
+        try:
+            response = requests.get(url, timeout=15)
+            xls = pd.ExcelFile(BytesIO(response.content))
+            dfs = []
+            for sheet in xls.sheet_names:
+                df = pd.read_excel(xls, sheet_name=sheet)
+                dfs.append(df)
+            combined_df = pd.concat(dfs, ignore_index=True)
+            
+            # Nettoyage et conversion
+            combined_df = combined_df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
+            combined_df["date_of_case"] = pd.to_datetime(combined_df["date"], errors="coerce")
+            combined_df["year"] = combined_df["date_of_case"].dt.year
+            combined_df["month"] = combined_df["date_of_case"].dt.month
+            combined_df["week"] = combined_df["date_of_case"].dt.isocalendar().week
+            
+            # Renommer les colonnes pour correspondre à la base
+            column_mapping = {
+                "date": "date",
+                "reference": "reference",
+                "notifying_country": "notifying_country",
+                "country_origin": "country_origin",
+                "product_category": "product_category",
+                "product": "product",
+                "subject": "subject",
+                "hazard_substance": "hazard_substance",
+                "hazard_category": "hazard_category",
+                "classification": "classification",
+                "risk_decision": "risk_decision",
+                "distribution": "distribution",
+                "forAttention": "attention",
+                "forFollowUp": "follow_up",
+                "operator": "operator",
+                "origin": "origin",
+                "hazards": "hazards"
+            }
+            combined_df.rename(columns=column_mapping, inplace=True)
+            
+            # Suppression des doublons
+            conn = sqlite3.connect(DB_PATH)
+            existing_refs = pd.read_sql("SELECT reference FROM rasff_data", conn)["reference"].tolist()
+            new_data = combined_df[~combined_df["reference"].isin(existing_refs)]
+            
+            # Insertion
+            new_data.to_sql("rasff_data", conn, if_exists="append", index=False)
+            total_added += len(new_data)
+            st.write(f"Semaine {year}-W{week}: {len(new_data)} nouvelles alertes ajoutées")
+            
+        except Exception as e:
+            st.error(f"Erreur pour {year}-W{week}: {str(e)[:50]}")
+    
+    return total_added
+
+# Interface Streamlit
 def main():
     st.title("🚨 RASFF Alerts Dashboard")
     
-    # Initialize database
+    # Initialisation
     if not os.path.exists(DB_PATH):
         download_github_db()
     create_database()
     update_database_structure()
     
-    # Sidebar controls
-    st.sidebar.title("⚙️ Actions")
-    if st.sidebar.button("Fetch latest GitHub database"):
+    # Menu latéral
+    st.sidebar.title("🔧 Paramètres")
+    if st.sidebar.button("🔄 Récupérer GitHub"):
         download_github_db()
     
-    if st.sidebar.button("Push updates to GitHub"):
-        if st.sidebar.checkbox("Confirm update"):
+    if st.sidebar.button("🔄 Push vers GitHub"):
+        if st.sidebar.checkbox("Confirmer"):
             push_to_github()
     
-    # File upload section
-    st.sidebar.title("📤 File Upload")
-    uploaded_file = st.sidebar.file_uploader("Upload Excel/XLSX file", type=["xlsx", "xls"])
+    # Mise à jour manuelle
+    uploaded_file = st.sidebar.file_uploader("Uploader fichier Excel", type=["xlsx"])
     if uploaded_file:
-        if st.sidebar.button("Process uploaded file"):
-            df = process_excel_upload(uploaded_file)
-            if df is not None:
-                update_from_uploaded_file(df)
+        if st.sidebar.button("Traiter le fichier"):
+            try:
+                xls = pd.ExcelFile(uploaded_file)
+                dfs = []
+                for sheet in xls.sheet_names:
+                    df = pd.read_excel(xls, sheet_name=sheet)
+                    dfs.append(df)
+                uploaded_df = pd.concat(dfs, ignore_index=True)
+                
+                # Nettoyage et conversion
+                uploaded_df = uploaded_df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
+                uploaded_df["date_of_case"] = pd.to_datetime(uploaded_df["date"], errors="coerce")
+                uploaded_df["year"] = uploaded_df["date_of_case"].dt.year
+                uploaded_df["month"] = uploaded_df["date_of_case"].dt.month
+                uploaded_df["week"] = uploaded_df["date_of_case"].dt.isocalendar().week
+                
+                # Renommer les colonnes
+                column_mapping = {
+                    "date": "date",
+                    "reference": "reference",
+                    "notifying_country": "notifying_country",
+                    "country_origin": "country_origin",
+                    "product_category": "product_category",
+                    "product": "product",
+                    "subject": "subject",
+                    "hazard_substance": "hazard_substance",
+                    "hazard_category": "hazard_category",
+                    "classification": "classification",
+                    "risk_decision": "risk_decision",
+                    "distribution": "distribution",
+                    "forAttention": "attention",
+                    "forFollowUp": "follow_up",
+                    "operator": "operator",
+                    "origin": "origin",
+                    "hazards": "hazards"
+                }
+                uploaded_df.rename(columns=column_mapping, inplace=True)
+                
+                # Insertion
+                conn = sqlite3.connect(DB_PATH)
+                existing_refs = pd.read_sql("SELECT reference FROM rasff_data", conn)["reference"].tolist()
+                new_entries = uploaded_df[~uploaded_df["reference"].isin(existing_refs)]
+                new_entries.to_sql("rasff_data", conn, if_exists="append", index=False)
+                st.success(f"{len(new_entries)} alertes ajoutées depuis le fichier")
+                conn.close()
+            
+            except Exception as e:
+                st.error(f"Erreur traitement fichier : {e}")
+    
+    # Mise à jour automatique
+    if st.button("🔄 Mettre à jour automatique"):
+        with st.spinner("Mise à jour en cours..."):
+            new_alerts = update_database()
+            if new_alerts > 0:
                 push_to_github()
     
-    # Automatic update logic (keep your existing update_database() function here)
+    # Affichage des données
+    conn = sqlite3.connect(DB_PATH)
+    df = pd.read_sql("SELECT * FROM rasff_data", conn)
+    st.write("## 📊 Statistiques")
+    st.dataframe(df)
     
-    # Display data
-    df = pd.read_sql("SELECT * FROM rasff_data", sqlite3.connect(DB_PATH))
-    st.write("## 📊 Data")
-    st.dataframe(df.head(10))
-
 if __name__ == "__main__":
     main()
