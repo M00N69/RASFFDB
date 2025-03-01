@@ -6,6 +6,9 @@ import requests
 import base64
 from io import BytesIO
 
+st.set_page_config(layout="wide")
+
+
 # Charger le token GitHub depuis les secrets Streamlit Cloud
 GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
 REPO_OWNER = "M00N69"
