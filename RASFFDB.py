@@ -5,7 +5,6 @@ import os
 import requests
 import base64
 from io import BytesIO
-from dotenv import load_dotenv
 
 # Charger le token GitHub depuis les secrets Streamlit Cloud
 GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
