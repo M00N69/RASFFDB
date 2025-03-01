@@ -8,3 +8,4 @@ seaborn
 matplotlib
 scipy
 streamlit-option-menu
+streamlit-aggrid
