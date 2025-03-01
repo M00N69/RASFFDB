@@ -94,7 +94,6 @@ COLUMN_MAPPING = {
 }
 
 # === FONCTIONS ===
-@st.cache_data(ttl=cache_ttl)
 def create_database():
     """Crée la base de données si elle n'existe pas"""
     conn = sqlite3.connect(DB_PATH)
@@ -115,6 +114,58 @@ def create_database():
         )
     """)
     conn.commit()
+    conn.close()
+
+def update_database_structure():
+    """Ajoute les colonnes year, month, week si elles sont absentes."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    # Vérifier et ajouter la colonne 'year' si absente
+    cursor.execute("PRAGMA table_info(rasff_data);")
+    columns = [col[1] for col in cursor.fetchall()]
+
+    if 'year' not in columns:
+        cursor.execute("ALTER TABLE rasff_data ADD COLUMN year INTEGER;")
+    if 'month' not in columns:
+        cursor.execute("ALTER TABLE rasff_data ADD COLUMN month INTEGER;")
+    if 'week' not in columns:
+        cursor.execute("ALTER TABLE rasff_data ADD COLUMN week INTEGER;")
+
+    conn.commit()
+    conn.close()
+
+def check_database_structure():
+    """Vérifie la structure de la base de données et affiche des informations"""
+    if not os.path.exists(DB_PATH):
+        st.error("Base de données non trouvée.")
+        return
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    # Afficher les colonnes
+    cursor.execute("PRAGMA table_info(rasff_data);")
+    columns = cursor.fetchall()
+
+    st.subheader("Structure de la table")
+    columns_df = pd.DataFrame(columns, columns=["cid", "name", "type", "notnull", "dflt_value", "pk"])
+    st.dataframe(columns_df)
+
+    # Nombre total d'enregistrements
+    cursor.execute("SELECT COUNT(*) FROM rasff_data")
+    count = cursor.fetchone()[0]
+    st.metric("Nombre total d'enregistrements", count)
+
+    # Répartition par année
+    cursor.execute("SELECT year, COUNT(*) FROM rasff_data GROUP BY year ORDER BY year DESC")
+    years_data = cursor.fetchall()
+
+    if years_data:
+        years_df = pd.DataFrame(years_data, columns=["Année", "Nombre"])
+        st.subheader("Répartition par année")
+        st.dataframe(years_df)
+
     conn.close()
 
 @st.cache_data(ttl=cache_ttl)
@@ -193,7 +244,6 @@ def update_database(new_data):
     conn.close()
     return new_data
 
-@st.cache_data(ttl=cache_ttl)
 def get_clean_dataframe():
     """Récupère et nettoie les données de la base SQLite"""
     if not os.path.exists(DB_PATH):
@@ -394,10 +444,11 @@ def create_hazard_chart(df, selected_year):
 
 # Sidebar
 with st.sidebar:
-    st.image("https://ec.europa.eu/food/sites/food/files/safety/img/rasff-header-small.png", width=200)
+    st.image("https://riskplaza.com/wp-content/uploads/2017/10/Riskplaza-RASFF-portal.png", width=200)
     st.markdown("## 🔄 Mise à jour des données")
 
     create_database()
+    update_database_structure()
     last_year, last_week = get_last_year_week()
 
     st.markdown(f"""
@@ -489,8 +540,9 @@ with st.sidebar:
                     <p>{total_new} nouvelle(s) alerte(s) ajoutée(s)</p>
                 </div>
                 """, unsafe_allow_html=True)
-                # Clear cache to refresh data
+                # Force refresh data by clearing cache
                 st.cache_data.clear()
+                st.rerun()  # Rerun the app to reflect the updated data
             else:
                 st.markdown("""
                 <div class="info-box">
@@ -519,7 +571,7 @@ with st.sidebar:
 st.markdown('<h1 class="main-header">🚨 Tableau de bord RASFF</h1>', unsafe_allow_html=True)
 
 # Tabs for different views
-tab1, tab2 = st.tabs(["📊 Dashboard", "📋 Données brutes"])
+tab1, tab2, tab3 = st.tabs(["📊 Dashboard", "📋 Données brutes", "🔧 Débogage"])
 
 with tab1:
     # Dashboard view
@@ -653,6 +705,16 @@ with tab2:
     else:
         st.warning("⚠️ Aucune donnée en base. Veuillez mettre à jour la base de données.")
         st.info("👈 Utilisez le menu latéral pour mettre à jour les données.")
+
+with tab3:
+    st.markdown('<h2 class="sub-header">🔧 Débogage de la base de données</h2>', unsafe_allow_html=True)
+    if st.button("Vérifier la structure de la base"):
+        check_database_structure()
+
+    if st.button("Effacer le cache"):
+        st.cache_data.clear()
+        st.success("Cache effacé avec succès! Les données seront rechargées.")
+        st.rerun()  # Rerun the app to reflect changes
 
 # Footer
 st.markdown("---")
