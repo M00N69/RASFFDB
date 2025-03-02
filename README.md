@@ -2,6 +2,8 @@
 🟢 Partie 1 : Fonctionnalités Utilisateur (Interface Streamlit)
 Objectif: Fournir un tableau de bord interactif pour consulter les alertes RASFF.
 
+https://www.sirene-diffusion.fr/regia/000-rasff/25/rasff-2025-08.xls
+
 🌟 1. Mise en Page et Configuration:
 python
 Copier
