@@ -93,43 +93,65 @@ def get_last_update_info():
         result = conn.execute(query).fetchone()
     return result
 
-# Fonction pour télécharger et ajouter les nouvelles données
+# Fonction pour télécharger et ajouter les semaines manquantes
 def update_database():
     last_year, last_week = get_last_update_info()
     current_year = pd.Timestamp.now().year
     current_week = pd.Timestamp.now().week
 
+    # Vérifier les semaines manquantes dans la base de données
+    with sqlite3.connect(DB_PATH) as conn:
+        query = """
+        SELECT year, week FROM rasff_notifications
+        GROUP BY year, week
+        ORDER BY year, week
+        """
+        existing_weeks = pd.read_sql(query, conn)
+
+    missing_weeks = []
     for year in range(last_year, current_year + 1):
-        start_week = last_week + 1 if year == last_year else 1
-        end_week = current_week if year == current_year else 52
+        for week in range(1, 53):
+            if year == current_year and week > current_week:
+                break
+            if not ((existing_weeks['year'] == year) & (existing_weeks['week'] == week)).any():
+                missing_weeks.append((year, week))
 
-        for week in range(start_week, end_week + 1):
-            week_str = str(week).zfill(2)
-            url = f"https://www.sirene-diffusion.fr/regia/000-rasff/{str(year)[-2:]}/rasff-{year}-{week_str}.xls"
-            response = requests.get(url)
+    if missing_weeks:
+        st.write(f"🔄 {len(missing_weeks)} semaines manquantes détectées.")
+    else:
+        st.write("✅ Aucune semaine manquante détectée.")
 
-            if response.status_code == 200:
-                st.write(f"📥 Téléchargement réussi pour {url}")
-                try:
-                    df = pd.read_excel(BytesIO(response.content))
-                    st.write(f"✅ Lecture du fichier Excel réussie pour {year} - semaine {week_str}")
-                    
-                    if 'date' not in df.columns:
-                        st.error(f"❌ Colonne 'date' manquante dans le fichier {year} - semaine {week_str}")
-                        continue
+    # Télécharger et insérer les semaines manquantes
+    for year, week in missing_weeks:
+        week_str = str(week).zfill(2)
+        url = f"https://www.sirene-diffusion.fr/regia/000-rasff/{str(year)[-2:]}/rasff-{year}-{week_str}.xls"
+        response = requests.get(url)
 
-                    df['date'] = pd.to_datetime(df['date'], format='%d-%m-%Y %H:%M:%S', errors='coerce')
-                    df['year'] = df['date'].dt.year
-                    df['week'] = df['date'].dt.isocalendar().week
+        if response.status_code == 200:
+            st.write(f"📥 Téléchargement réussi pour {url}")
+            try:
+                df = pd.read_excel(BytesIO(response.content))
+                if 'date' not in df.columns:
+                    st.error(f"❌ Colonne 'date' manquante dans le fichier {year} - semaine {week_str}")
+                    continue
 
-                    with sqlite3.connect(DB_PATH) as conn:
-                        df.to_sql("rasff_notifications", conn, if_exists="append", index=False)
-                    st.write(f"✅ Données insérées dans la base pour {year} - semaine {week_str}")
-                except Exception as e:
-                    st.error(f"❌ Erreur lors de la lecture du fichier Excel pour l'année {year}, semaine {week_str}: {e}")
-            else:
-                st.write(f"❌ Fichier non trouvé pour l'année {year}, semaine {week_str}")
-                continue
+                df['date'] = pd.to_datetime(df['date'], format='%d-%m-%Y %H:%M:%S', errors='coerce')
+                df['year'] = df['date'].dt.year
+                df['week'] = df['date'].dt.isocalendar().week
+
+                with sqlite3.connect(DB_PATH) as conn:
+                    df.to_sql("rasff_notifications", conn, if_exists="append", index=False)
+                st.write(f"✅ Données insérées pour {year} - semaine {week_str}")
+            except Exception as e:
+                st.error(f"❌ Erreur lors de l'insertion du fichier Excel : {e}")
+        else:
+            st.write(f"❌ Fichier non trouvé pour {year} - semaine {week_str}")
+            continue
+
+    if not missing_weeks:
+        st.write("✅ Toutes les semaines sont déjà à jour.")
+    else:
+        st.write("✅ Mise à jour des semaines manquantes terminée.")
 
 # Initialisation
 if not os.path.exists(DB_PATH):
@@ -141,7 +163,7 @@ def main():
 
     # Bouton pour mettre à jour la base
     if st.button("🔄 Mettre à jour la base RASFF"):
-        st.write("📥 Téléchargement des nouvelles données...")
+        st.write("📥 Téléchargement des nouvelles données et des semaines manquantes...")
         update_database()
         show_last_entries()
         st.write("📤 Synchronisation avec GitHub...")
@@ -165,11 +187,9 @@ def main():
     if selected_category != "Toutes":
         filtered_df = filtered_df[filtered_df["category"] == selected_category]
 
-    # Affichage
     st.write(f"## 📊 {len(filtered_df)} alertes ({selected_year})")
     st.dataframe(filtered_df, height=600)
 
-    # Graphiques
     st.write("## 🌟 Répartition par pays")
     st.bar_chart(filtered_df["notifying_country"].value_counts().head(10))
 
