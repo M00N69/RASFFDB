@@ -21,10 +21,8 @@ DB_PATH = "rasff_data.db"
 def add_missing_columns():
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
-        # Ajouter les colonnes si elles n'existent pas
         cursor.execute("ALTER TABLE rasff_notifications ADD COLUMN year INTEGER")
         cursor.execute("ALTER TABLE rasff_notifications ADD COLUMN week INTEGER")
-        # Mettre à jour les nouvelles colonnes avec les valeurs extraites de 'date'
         cursor.execute("UPDATE rasff_notifications SET year = strftime('%Y', date)")
         cursor.execute("UPDATE rasff_notifications SET week = strftime('%W', date)")
         conn.commit()
@@ -44,30 +42,37 @@ def download_from_github():
 
 # Fonction pour mettre à jour le fichier sur GitHub
 def update_github():
-    with open(DB_PATH, "rb") as file:
-        content = file.read()
-    encoded_content = base64.b64encode(content).decode()
+    try:
+        with open(DB_PATH, "rb") as file:
+            content = file.read()
+        encoded_content = base64.b64encode(content).decode()
 
-    response = requests.get(GITHUB_API_URL, headers={
-        "Authorization": f"Bearer {GITHUB_TOKEN}"
-    })
-    response_data = response.json()
-    sha = response_data.get("sha", None)
+        response = requests.get(GITHUB_API_URL, headers={
+            "Authorization": f"Bearer {GITHUB_TOKEN}"
+        })
+        if response.status_code != 200:
+            st.error("❌ Impossible de récupérer les informations du fichier sur GitHub.")
+            return
 
-    data = {
-        "message": "Mise à jour automatique de la base RASFF",
-        "content": encoded_content,
-        "sha": sha
-    }
+        response_data = response.json()
+        sha = response_data.get("sha", None)
 
-    response = requests.put(GITHUB_API_URL, json=data, headers={
-        "Authorization": f"Bearer {GITHUB_TOKEN}"
-    })
+        data = {
+            "message": "Mise à jour automatique de la base RASFF",
+            "content": encoded_content,
+            "sha": sha
+        }
 
-    if response.status_code in [200, 201]:
-        st.success("✅ Mise à jour réussie sur GitHub !")
-    else:
-        st.error(f"❌ Échec de la mise à jour : {response.json()}")
+        response = requests.put(GITHUB_API_URL, json=data, headers={
+            "Authorization": f"Bearer {GITHUB_TOKEN}"
+        })
+
+        if response.status_code in [200, 201]:
+            st.success("✅ Mise à jour réussie sur GitHub !")
+        else:
+            st.error(f"❌ Échec de la mise à jour sur GitHub : {response.json()}")
+    except Exception as e:
+        st.error(f"❌ Erreur lors de la mise à jour sur GitHub : {e}")
 
 # Fonction pour vérifier la dernière semaine et année dans la base
 def get_last_update_info():
@@ -92,18 +97,25 @@ def update_database():
             response = requests.get(url)
 
             if response.status_code == 200:
-                df = pd.read_excel(BytesIO(response.content))
-                df['date'] = pd.to_datetime(df['date'], format='%d-%m-%Y %H:%M:%S', errors='coerce')
-                df['year'] = df['date'].dt.year
-                df['week'] = df['date'].dt.isocalendar().week
+                try:
+                    df = pd.read_excel(BytesIO(response.content))
+                    if 'date' not in df.columns:
+                        st.error(f"❌ Colonne 'date' manquante dans le fichier {year} - semaine {week_str}")
+                        continue
+                    
+                    df['date'] = pd.to_datetime(df['date'], format='%d-%m-%Y %H:%M:%S', errors='coerce')
+                    df['year'] = df['date'].dt.year
+                    df['week'] = df['date'].dt.isocalendar().week
 
-                # Insertion dans la base de données
-                with sqlite3.connect(DB_PATH) as conn:
-                    df.to_sql("rasff_notifications", conn, if_exists="append", index=False)
-                st.write(f"✅ Données ajoutées pour l'année {year}, semaine {week_str}")
+                    # Insertion dans la base de données
+                    with sqlite3.connect(DB_PATH) as conn:
+                        df.to_sql("rasff_notifications", conn, if_exists="append", index=False)
+                    st.write(f"✅ Données ajoutées pour l'année {year}, semaine {week_str}")
+                except Exception as e:
+                    st.error(f"❌ Erreur lors de la lecture du fichier Excel pour l'année {year}, semaine {week_str}: {e}")
             else:
                 st.write(f"❌ Fichier non trouvé pour l'année {year}, semaine {week_str}")
-                continue  # Continue la boucle même si le fichier manque
+                continue
 
 # Initialisation
 if not os.path.exists(DB_PATH):
